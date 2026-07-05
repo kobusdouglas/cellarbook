@@ -607,16 +607,23 @@ function adjustQty(id,d){
 }
 function drinkOne(id){
   const w = state.wines.find(x=>x.id===id); if(!w) return;
-  let opened = false;
+  let opened = null;
   if((+w.qty||0)>0){
     w.qty = +w.qty - 1;
-    state.consumed.push({ id:uid(), wineId:w.id, name:w.name, vintage:w.vintage||'',
+    const cid = uid();
+    state.consumed.push({ id:cid, wineId:w.id, name:w.name, vintage:w.vintage||'',
       type:w.type||'', price:+w.price||0, date:new Date().toISOString().slice(0,10) });
     save();
     render();                       // count drops on screen immediately
-    opened = true;
+    opened = { left: +w.qty, wineId: w.id, consumedId: cid };
   }
-  openTastingForm(null, w, opened ? { left: +w.qty } : null);
+  openTastingForm(null, w, opened);
+}
+function undoOpen(wineId, consumedId){
+  const w = state.wines.find(x=>x.id===wineId);
+  if(w) w.qty = (+w.qty||0) + 1;
+  state.consumed = state.consumed.filter(c=>c.id!==consumedId);
+  save(); closeSheet(); render();
 }
 const fmtMonth = d => { const dt = new Date(d+'T00:00'); return isNaN(dt)? '' : dt.toLocaleDateString('en-ZA',{month:'short',year:'numeric'}); };
 let rT; function debouncedRender(){ clearTimeout(rT); rT=setTimeout(render,220); }
@@ -950,7 +957,10 @@ function openTastingForm(id, prefillWine, openedInfo){
   const names = [...new Set(state.wines.map(w=>w.name))];
   const head = openedInfo
     ? `<h2>Bottle opened ✓</h2>
-       <p style="font-size:12.5px;color:var(--muted);font-weight:600;margin:-8px 0 14px">${openedInfo.left} left in the cellar — add a tasting note, or close to skip.</p>`
+       <div style="display:flex;align-items:center;gap:10px;margin:-8px 0 14px">
+         <p style="flex:1;font-size:12.5px;color:var(--muted);font-weight:600">${openedInfo.left} left in the cellar — add a note, or close to skip.</p>
+         <button class="mini-btn quiet" onclick="undoOpen('${openedInfo.wineId}','${openedInfo.consumedId}')">Undo</button>
+       </div>`
     : `<h2>${t?'Edit tasting':'Tasting note'}</h2>`;
   sheetHTML(`
     ${head}
