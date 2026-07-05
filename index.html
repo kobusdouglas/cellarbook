@@ -607,13 +607,16 @@ function adjustQty(id,d){
 }
 function drinkOne(id){
   const w = state.wines.find(x=>x.id===id); if(!w) return;
+  let opened = false;
   if((+w.qty||0)>0){
     w.qty = +w.qty - 1;
     state.consumed.push({ id:uid(), wineId:w.id, name:w.name, vintage:w.vintage||'',
       type:w.type||'', price:+w.price||0, date:new Date().toISOString().slice(0,10) });
     save();
+    render();                       // count drops on screen immediately
+    opened = true;
   }
-  openTastingForm(null, w);
+  openTastingForm(null, w, opened ? { left: +w.qty } : null);
 }
 const fmtMonth = d => { const dt = new Date(d+'T00:00'); return isNaN(dt)? '' : dt.toLocaleDateString('en-ZA',{month:'short',year:'numeric'}); };
 let rT; function debouncedRender(){ clearTimeout(rT); rT=setTimeout(render,220); }
@@ -938,15 +941,19 @@ function deleteWine(id){
 }
 
 /* ================= tasting form ================= */
-function openTastingForm(id, prefillWine){
+function openTastingForm(id, prefillWine, openedInfo){
   const t = id? state.tastings.find(x=>x.id===id) : null;
   ui.photo = t?.photo || (prefillWine?.photo || null);
   const today = new Date().toISOString().slice(0,10);
   const name = t? t.name : (prefillWine? prefillWine.name : '');
   const vintage = t? (t.vintage||'') : (prefillWine? (prefillWine.vintage||'') : '');
   const names = [...new Set(state.wines.map(w=>w.name))];
+  const head = openedInfo
+    ? `<h2>Bottle opened ✓</h2>
+       <p style="font-size:12.5px;color:var(--muted);font-weight:600;margin:-8px 0 14px">${openedInfo.left} left in the cellar — add a tasting note, or close to skip.</p>`
+    : `<h2>${t?'Edit tasting':'Tasting note'}</h2>`;
   sheetHTML(`
-    <h2>${t?'Edit tasting':'Tasting note'}</h2>
+    ${head}
     <div id="photo-holder">${photoBoxHTML()}</div>
     <div class="f-row"><label>Wine</label>
       <input id="t-name" value="${esc(name)}" list="wine-names" placeholder="Wine name">
