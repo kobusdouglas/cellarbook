@@ -397,7 +397,35 @@ function alertWines(){
 }
 
 /* ================= tabs & render ================= */
-function setTab(t){ ui.tab=t; render(); }
+/* ---- hardware back button: step back through the app, not out of it ---- */
+let navArmed = false, navCleanup = false;
+function armBack(){ if(!navArmed){ try{ history.pushState({cb:1},''); navArmed = true; }catch(e){} } }
+function atRoot(){
+  return !document.querySelector('.lightbox')
+    && !document.getElementById('sheet').classList.contains('open')
+    && ui.tab === 'cellar' && ui.cellarMode === 'cellar';
+}
+function maybeDisarm(){
+  if(navArmed && atRoot()){ navCleanup = true; history.back(); }
+}
+window.addEventListener('popstate', () => {
+  navArmed = false;
+  if(navCleanup){
+    // a housekeeping pop we triggered ourselves — never touch the UI,
+    // but re-arm if a new layer opened while the pop was in flight
+    navCleanup = false;
+    if(!atRoot()) armBack();
+    return;
+  }
+  const lb = document.querySelector('.lightbox');
+  if(lb) lb.remove();
+  else if(document.getElementById('sheet').classList.contains('open')) closeSheet();
+  else if(ui.tab !== 'cellar'){ ui.tab = 'cellar'; render(); }
+  else if(ui.cellarMode !== 'cellar'){ ui.cellarMode = 'cellar'; render(); }
+  if(!atRoot()) armBack();
+});
+function setTab(t){ ui.tab = t; render(); t === 'cellar' ? maybeDisarm() : armBack(); }
+function setCellarMode(m){ ui.cellarMode = m; render(); m === 'cellar' ? maybeDisarm() : armBack(); }
 function render(){
   const act = document.activeElement;
   const keepFocus = (act && (act.id==='cellar-search' || act.id==='tastings-search'))
@@ -433,8 +461,8 @@ function viewCellar(){
   const q = ui.search.toLowerCase();
   const seg = `
     <div class="seg">
-      <button class="seg-btn ${ui.cellarMode==='cellar'?'active':''}" onclick="ui.cellarMode='cellar';render()">Cellar</button>
-      <button class="seg-btn ${ui.cellarMode==='wish'?'active':''}" onclick="ui.cellarMode='wish';render()">Wishlist</button>
+      <button class="seg-btn ${ui.cellarMode==='cellar'?'active':''}" onclick="setCellarMode('cellar')">Cellar</button>
+      <button class="seg-btn ${ui.cellarMode==='wish'?'active':''}" onclick="setCellarMode('wish')">Wishlist</button>
     </div>`;
   if(ui.cellarMode==='wish') return seg + viewWishlist();
 
@@ -631,7 +659,8 @@ function lightbox(id, coll){
   const rec = state[coll].find(x=>x.id===id);
   if(!rec?.photo) return;
   const root = document.getElementById('lightbox-root');
-  root.innerHTML = `<div class="lightbox" onclick="this.remove()"><img src="${rec.photo}" alt="Label photo"></div>`;
+  root.innerHTML = `<div class="lightbox" onclick="this.remove();maybeDisarm()"><img src="${rec.photo}" alt="Label photo"></div>`;
+  armBack();
 }
 
 /* ================= alerts view ================= */
@@ -750,8 +779,12 @@ function compressImage(file, maxDim=1100, q=.72){
 function photoBoxHTML(){
   if(!ui.photo) return `
     <div class="f-row"><label>Label photo</label>
-      <button class="photo-box" onclick="document.getElementById('photo-input').click()">📷 &nbsp;Take or choose a label photo</button>
-      <input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none" onchange="photoPicked(this)">
+      <div class="f-split">
+        <button class="photo-box" onclick="document.getElementById('photo-camera').click()">📷 &nbsp;Take photo</button>
+        <button class="photo-box" onclick="document.getElementById('photo-gallery').click()">🖼 &nbsp;From gallery</button>
+      </div>
+      <input type="file" id="photo-camera" accept="image/*" capture="environment" style="display:none" onchange="photoPicked(this)">
+      <input type="file" id="photo-gallery" accept="image/*" style="display:none" onchange="photoPicked(this)">
       <div class="scan-status" id="scan-status"></div>
     </div>`;
   return `
@@ -764,7 +797,6 @@ function photoBoxHTML(){
           <button class="mini-btn quiet" onclick="ui.photo=null;refreshPhotoBox()">Remove photo</button>
         </div>
       </div>
-      <input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none" onchange="photoPicked(this)">
       <div class="scan-status" id="scan-status"></div>
       <div id="ocr-chips"></div>
     </div>`;
@@ -957,10 +989,10 @@ function openSettings(){
     <h2>Settings</h2>
     <p style="font-size:12.5px;font-weight:600;margin:-6px 0 12px;color:${b.warn?'var(--ochre)':'var(--muted)'}">${b.msg}${b.warn?' Time for a fresh one.':''}</p>
     <button class="settings-btn" onclick="exportPDF()">Export cellar as PDF<small>A printable inventory: every wine with vintage, region, bin, quantity, score, drink window and value.</small></button>
-    <button class="settings-btn" onclick="shareBackup()">Share backup<small>Send the backup file to Google Drive, email or WhatsApp via your phone's share sheet.</small></button>
+    <button class="settings-btn" onclick="shareBackup()">Share backup<small>Sends the backup to Google Drive, email or WhatsApp via the share sheet (as a .txt file — restore accepts it as-is).</small></button>
     <button class="settings-btn" onclick="exportData()">Export backup<small>Download everything (incl. photos) as a JSON file — keep a copy in your cloud drive.</small></button>
     <button class="settings-btn" onclick="document.getElementById('import-file').click()">Restore from backup<small>Load a previously exported JSON file. Replaces current data.</small></button>
-    <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(this)">
+    <input type="file" id="import-file" accept=".json,.txt,application/json,text/plain" style="display:none" onchange="importData(this)">
     <button class="danger-link" onclick="wipeData()">Erase all data</button>
   `);
 }
@@ -973,15 +1005,18 @@ function exportData(){
   state.lastBackup = Date.now(); save();
 }
 async function shareBackup(){
-  const name = 'cellarbook-backup-'+new Date().toISOString().slice(0,10)+'.json';
-  const file = new File([JSON.stringify(state,null,2)], name, {type:'application/json'});
+  // Android only allows sharing whitelisted file types — .json is not one of
+  // them, so the backup travels as plain text (.txt). Restore reads it fine.
+  const name = 'cellarbook-backup-'+new Date().toISOString().slice(0,10)+'.txt';
+  const file = new File([JSON.stringify(state,null,2)], name, {type:'text/plain'});
   if(navigator.canShare && navigator.canShare({files:[file]})){
     try{
       await navigator.share({ files:[file], title:'Cellar Book backup' });
       state.lastBackup = Date.now(); save();
     }catch(e){ /* user closed the share sheet — nothing to do */ }
   }else{
-    alert("Sharing files isn't supported in this browser — use Export backup instead and upload the file to Drive yourself.");
+    exportData();
+    alert("Sharing isn't available in this browser, so the backup was downloaded instead — upload the file to Drive from your Files app.");
   }
 }
 
@@ -1063,11 +1098,13 @@ function sheetHTML(inner){
   s.scrollTop = 0;
   document.getElementById('backdrop').classList.add('open');
   requestAnimationFrame(()=>s.classList.add('open'));
+  armBack();
 }
 function closeSheet(){
   ui.pendingWish = null;
   document.getElementById('sheet').classList.remove('open');
   document.getElementById('backdrop').classList.remove('open');
+  maybeDisarm();
 }
 function emptyState(glyph,msg,btnLabel,btnFn){
   return `<div class="empty"><div class="glyph">${glyph}</div><p>${msg}</p>

@@ -28,7 +28,7 @@ You now have a Cellar Book icon on your home screen. It opens full-screen, works
 
 ## Backups and Google Drive
 
-**Settings → Share backup** opens your phone's share sheet — pick Google Drive and the backup JSON is saved there in two taps. To restore (on this phone or a new one), **Restore from backup** opens the file picker, which can browse Drive directly. A backup after any big cellar update is a good habit.
+**Settings → Share backup** opens your phone's share sheet — pick Google Drive and the backup is saved there in two taps (it travels as a .txt file because Android restricts which file types can be shared; the content is the same and restore accepts it directly). To restore (on this phone or a new one), **Restore from backup** opens the file picker, which can browse Drive directly. A backup after any big cellar update is a good habit.
 
 ## Backups
 
@@ -52,7 +52,7 @@ The camera button in the bottle and tasting forms attaches a label photo to the 
 
 ## Backups and Google Drive
 
-**Settings → Share backup** opens your phone's share sheet — pick Google Drive and the backup JSON is saved there in two taps. To restore (on this phone or a new one), **Restore from backup** opens the file picker, which can browse Drive directly. A backup after any big cellar update is a good habit.
+**Settings → Share backup** opens your phone's share sheet — pick Google Drive and the backup is saved there in two taps (it travels as a .txt file because Android restricts which file types can be shared; the content is the same and restore accepts it directly). To restore (on this phone or a new one), **Restore from backup** opens the file picker, which can browse Drive directly. A backup after any big cellar update is a good habit.
 
 ## Backups
 
