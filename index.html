@@ -607,22 +607,58 @@ function adjustQty(id,d){
 }
 function drinkOne(id){
   const w = state.wines.find(x=>x.id===id); if(!w) return;
-  let opened = null;
-  if((+w.qty||0)>0){
-    w.qty = +w.qty - 1;
-    const cid = uid();
-    state.consumed.push({ id:cid, wineId:w.id, name:w.name, vintage:w.vintage||'',
-      type:w.type||'', price:+w.price||0, date:new Date().toISOString().slice(0,10) });
-    save();
-    render();                       // count drops on screen immediately
-    opened = { left: +w.qty, wineId: w.id, consumedId: cid };
-  }
-  openTastingForm(null, w, opened);
+  if((+w.qty||0) <= 0){ openTastingForm(null, w, null); return; }
+  w.qty = +w.qty - 1;
+  const cid = uid();
+  state.consumed.push({ id:cid, wineId:w.id, name:w.name, vintage:w.vintage||'',
+    type:w.type||'', price:+w.price||0, date:new Date().toISOString().slice(0,10) });
+  const last = +w.qty === 0;
+  if(last) state.wines = state.wines.filter(x=>x.id!==w.id);   // empty bottles leave the cellar
+  save();
+  render();                                                    // count updates on screen immediately
+  ui.lastOpenedWine = w;
+  ui.lastOpenedInfo = { left:+w.qty, wineId:w.id, consumedId:cid, last };
+  const hasNote = state.tastings.some(t=>(t.name||'').toLowerCase()===(w.name||'').toLowerCase());
+  hasNote ? openOpenedSheet() : openTastingForm(null, w, ui.lastOpenedInfo);
 }
-function undoOpen(wineId, consumedId){
-  const w = state.wines.find(x=>x.id===wineId);
+function openedHeadHTML(info){
+  const msg = info.last
+    ? 'That was the last bottle — removed from the cellar.'
+    : info.left+' left in the cellar — add a note, or close to skip.';
+  return `<h2>Bottle opened ✓</h2>
+    <div style="display:flex;align-items:center;gap:10px;margin:-8px 0 14px">
+      <p style="flex:1;font-size:12.5px;color:var(--muted);font-weight:600">${msg}</p>
+      <button class="mini-btn quiet" onclick="undoOpen()">Undo</button>
+    </div>`;
+}
+function openOpenedSheet(){
+  const w = ui.lastOpenedWine, info = ui.lastOpenedInfo;
+  const n = state.tastings.filter(t=>(t.name||'').toLowerCase()===(w.name||'').toLowerCase()).length;
+  sheetHTML(`
+    ${openedHeadHTML(info)}
+    <p style="font-size:13.5px;margin:2px 0 14px">${esc(w.name)} is already in your journal (${n} note${n===1?'':'s'}) — no new entry was added.</p>
+    <button class="settings-btn" onclick="viewNotesForLastOpened()">View journal notes</button>
+    <button class="settings-btn" onclick="addNoteForLastOpened()">Add another note anyway</button>
+  `);
+}
+function viewNotesForLastOpened(){
+  const w = ui.lastOpenedWine; if(!w) return;
+  closeSheet(); ui.tSearch = w.name; ui.tab = 'tastings'; render(); armBack();
+}
+function addNoteForLastOpened(){
+  if(ui.lastOpenedWine) openTastingForm(null, ui.lastOpenedWine, ui.lastOpenedInfo);
+}
+function undoOpen(){
+  const info = ui.lastOpenedInfo;
+  if(!info){ closeSheet(); return; }
+  const w = state.wines.find(x=>x.id===info.wineId);
   if(w) w.qty = (+w.qty||0) + 1;
-  state.consumed = state.consumed.filter(c=>c.id!==consumedId);
+  else if(ui.lastOpenedWine && ui.lastOpenedWine.id===info.wineId){
+    ui.lastOpenedWine.qty = 1;
+    state.wines.push(ui.lastOpenedWine);                       // resurrect a removed last bottle
+  }
+  state.consumed = state.consumed.filter(c=>c.id!==info.consumedId);
+  ui.lastOpenedInfo = null;
   save(); closeSheet(); render();
 }
 const fmtMonth = d => { const dt = new Date(d+'T00:00'); return isNaN(dt)? '' : dt.toLocaleDateString('en-ZA',{month:'short',year:'numeric'}); };
@@ -796,6 +832,8 @@ function photoBoxHTML(){
       <input type="file" id="photo-camera" accept="image/*" capture="environment" style="display:none" onchange="photoPicked(this)">
       <input type="file" id="photo-gallery" accept="image/*" style="display:none" onchange="photoPicked(this)">
       <div class="scan-status" id="scan-status"></div>
+      <div id="ocr-chips"></div>
+      ${altScanButtons()}
     </div>`;
   return `
     <div class="f-row"><label>Label photo</label>
@@ -804,16 +842,18 @@ function photoBoxHTML(){
         <div class="col">
           <button class="mini-btn" onclick="runOCR()">Read label</button>
           <div style="height:8px"></div>
-          <button class="mini-btn quiet" onclick="ui.photo=null;refreshPhotoBox()">Remove photo</button>
+          <button class="mini-btn quiet" onclick="ui.photo=null;ui.photoOCR=null;refreshPhotoBox()">Remove photo</button>
         </div>
       </div>
       <div class="scan-status" id="scan-status"></div>
       <div id="ocr-chips"></div>
+      ${altScanButtons()}
     </div>`;
 }
 async function photoPicked(input){
   const f = input.files[0]; if(!f) return;
-  ui.photo = await compressImage(f);
+  ui.photo = await compressImage(f);                 // 1100px copy for storage
+  ui.photoOCR = await compressImage(f, 1800, .9);    // sharper copy for reading
   refreshPhotoBox();
 }
 function refreshPhotoBox(){
@@ -834,40 +874,172 @@ function loadTesseract(){
     document.head.appendChild(s);
   });
 }
+const OCR_JUNK = /(\b\d{2,4}\s?m?l\b)|(\b\d{2}\s?cl\b)|alc(ohol)?\b|% ?vol|\bvol\.?$|product of|produce of|wine of|estate bottled|contains sul|sulphit|sulfit/i;
+function showLineChips(texts){
+  const box = document.getElementById('ocr-chips');
+  if(!box || !texts.length) return;
+  const chips = texts.slice(0,7).map(t =>
+    `<button class="mini-btn quiet" style="margin:0 6px 6px 0" onclick="useOcrLine(this)">${esc(t)}</button>`).join('');
+  box.innerHTML = `<div style="margin-top:8px;font-size:11px;color:var(--muted);font-weight:600">Lines read from the label — tap one to use as the name:</div><div style="margin-top:6px">${chips}</div>`;
+}
+function fillVintageFrom(text){
+  const vint = (text.match(/\b(19[5-9]\d|20[0-4]\d)\b/)||[])[0];
+  if(vint){
+    const vEl = document.getElementById('f-vintage') || document.getElementById('t-vintage');
+    if(vEl && !vEl.value) vEl.value = vint;
+  }
+  return vint;
+}
+function finishLabelRead(cands, fullText, doneMsg){
+  const vint = fillVintageFrom(fullText);
+  const named = cands.filter(l => !OCR_JUNK.test(l.text));
+  if(!named.length){
+    setScanStatus('No readable text found — stylised labels are hard for OCR. Try a straighter, closer, well-lit shot.', true);
+    return;
+  }
+  named.sort((a,b)=> b.h - a.h);
+  const nameEl = document.getElementById('f-name') || document.getElementById('t-name');
+  if(nameEl && !nameEl.value) nameEl.value = named[0].text;
+  showLineChips(named.map(l=>l.text));
+  setScanStatus(doneMsg + (vint ? ' Name and vintage filled in — tap a line to correct.' : ' Tap a line below to correct the name.'));
+}
+async function tryTextDetector(src){
+  if(!('TextDetector' in window)) return null;
+  try{
+    const img = new Image();
+    await new Promise((res,rej)=>{ img.onload = res; img.onerror = rej; img.src = src; });
+    const det = new TextDetector();
+    const found = await det.detect(await createImageBitmap(img));
+    const lines = found
+      .map(t => ({ text: String(t.rawValue||'').replace(/\s+/g,' ').trim(),
+                   h: (t.boundingBox && t.boundingBox.height) || 0 }))
+      .filter(l => l.text && /[A-Za-z]{3}/.test(l.text));
+    return lines.length >= 2 ? lines : null;
+  }catch(e){ return null; }
+}
+function preprocessForOCR(src){
+  return new Promise(res=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const scale = Math.min(2, 1800/Math.max(img.width,img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
+      const ctx = c.getContext('2d');
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const im = ctx.getImageData(0, 0, c.width, c.height), d = im.data;
+      const hist = new Uint32Array(256);
+      for(let i=0;i<d.length;i+=4){
+        const g = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2])|0;
+        d[i] = g; hist[g]++;
+      }
+      const cut = (d.length/4)*0.01;                 // clip 1% outliers, stretch the rest
+      let lo=0, hi=255, acc=0;
+      for(let v=0;v<256;v++){ acc+=hist[v]; if(acc>cut){ lo=v; break; } }
+      acc=0;
+      for(let v=255;v>=0;v--){ acc+=hist[v]; if(acc>cut){ hi=v; break; } }
+      const range = Math.max(1, hi-lo);
+      for(let i=0;i<d.length;i+=4){
+        let g = (d[i]-lo)*255/range; g = g<0?0:g>255?255:g;
+        d[i]=d[i+1]=d[i+2]=g;
+      }
+      ctx.putImageData(im, 0, 0);
+      res(c.toDataURL('image/png'));
+    };
+    img.src = src;
+  });
+}
+let ocrWorkerP = null;
+function getOcrWorker(){
+  if(!ocrWorkerP) ocrWorkerP = Tesseract.createWorker('eng');
+  return ocrWorkerP;
+}
 async function runOCR(){
-  if(!ui.photo) return;
+  const src = ui.photoOCR || ui.photo;
+  if(!src) return;
   setScanStatus('Loading text reader — first use downloads a few MB…');
   try{ await loadTesseract(); }
   catch(e){ setScanStatus('Could not load the OCR library. Check your connection and try again.', true); return; }
-  setScanStatus('Reading text on the label… (can take ~10 seconds)');
   try{
-    const { data } = await Tesseract.recognize(ui.photo, 'eng');
-    let lines = (data.lines || (data.text||'').split('\n').map(t=>({text:t, confidence:60, bbox:null})))
-      .map(l=>({ text: String(l.text||'').replace(/\s+/g,' ').trim(),
-                 conf: l.confidence ?? 60,
-                 h: l.bbox ? (l.bbox.y1 - l.bbox.y0) : 0 }))
-      .filter(l => l.conf > 45 && /[A-Za-z]{3}/.test(l.text) && l.text.length >= 3);
-    // vintage: first plausible year anywhere in the text
-    const vint = ((data.text||'').match(/\b(19[5-9]\d|20[0-4]\d)\b/)||[])[0];
-    if(vint){
-      const vEl = document.getElementById('f-vintage') || document.getElementById('t-vintage');
-      if(vEl && !vEl.value) vEl.value = vint;
-    }
-    if(!lines.length){
-      setScanStatus('No readable text found — stylised labels are hard for OCR. Try a straighter, closer, well-lit shot.', true);
+    setScanStatus('Reading the label…');
+    const fast = await tryTextDetector(src);         // Chrome's native reader, where available
+    if(fast){
+      finishLabelRead(fast, fast.map(l=>l.text).join('\n'), 'Read instantly on-device.');
       return;
     }
-    lines.sort((a,b)=> b.h - a.h);                 // most prominent print first
-    const nameEl = document.getElementById('f-name') || document.getElementById('t-name');
-    if(nameEl && !nameEl.value) nameEl.value = lines[0].text;
-    const chips = lines.slice(0,6).map(l =>
-      `<button class="mini-btn quiet" style="margin:0 6px 6px 0" onclick="useOcrLine(this)">${esc(l.text)}</button>`).join('');
-    const box = document.getElementById('ocr-chips');
-    if(box) box.innerHTML = `<div style="margin-top:8px;font-size:11px;color:var(--muted);font-weight:600">Lines read from the label — tap one to use as the name:</div><div style="margin-top:6px">${chips}</div>`;
-    setScanStatus(vint ? 'Done — name and vintage filled in from the label.' : 'Done — picked the most prominent line as the name.');
+    setScanStatus('Preparing the photo…');
+    const prepped = await preprocessForOCR(src);
+    const worker = await getOcrWorker();
+    const cands = [], seen = new Set();
+    let fullText = '';
+    for(const psm of ['3','11']){                    // auto layout, then sparse-text sweep
+      setScanStatus('Reading the label — pass '+(psm==='3'?'1':'2')+' of 2…');
+      await worker.setParameters({ tessedit_pageseg_mode: psm });
+      const { data } = await worker.recognize(prepped);
+      fullText += '\n' + (data.text || '');
+      for(const l of (data.lines || [])){
+        const text = String(l.text||'').replace(/\s+/g,' ').trim();
+        if(!text || (l.confidence ?? 0) <= 40 || !/[A-Za-z]{3}/.test(text)) continue;
+        const key = text.toLowerCase();
+        if(seen.has(key)) continue;
+        seen.add(key);
+        cands.push({ text, h: l.bbox ? (l.bbox.y1 - l.bbox.y0) : 0 });
+      }
+    }
+    finishLabelRead(cands, fullText, 'Done.');
   }catch(e){
     setScanStatus('OCR failed ('+(e.message||'error')+'). Try again or fill in by hand.', true);
   }
+}
+async function barcodePicked(input){
+  const f = input.files[0]; input.value = ''; if(!f) return;
+  setScanStatus('Looking for a barcode…');
+  try{
+    const det = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e'] });
+    const codes = await det.detect(await createImageBitmap(f));
+    if(!codes.length){ setScanStatus('No barcode found — get closer and steadier, with good light on the code.', true); return; }
+    await lookupBarcode(codes[0].rawValue);
+  }catch(e){ setScanStatus('Barcode scan failed ('+(e.message||'error')+').', true); }
+}
+async function lookupBarcode(code){
+  setScanStatus('Barcode '+code+' — looking it up…');
+  try{
+    const r = await fetch('https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+'.json');
+    const j = await r.json();
+    const p = j && j.product;
+    if(!p || !(p.product_name || p.brands)){
+      setScanStatus('Barcode '+code+" isn't in the open product database — fill in by hand or read the label instead.", true);
+      return;
+    }
+    const brand = p.brands ? p.brands.split(',')[0].trim() : '';
+    const name = [brand, p.product_name||''].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+    const fill = (id,v)=>{ const el = document.getElementById(id); if(el && v && !el.value) el.value = v; };
+    fill('f-name', name); fill('t-name', name);
+    fill('f-producer', brand);
+    setScanStatus('Found: '+name+' — check and adjust.');
+  }catch(e){ setScanStatus('Lookup failed — check your internet connection.', true); }
+}
+async function pasteLabelText(){
+  try{
+    const txt = await navigator.clipboard.readText();
+    if(!txt || !txt.trim()){ setScanStatus('Clipboard is empty — copy the label text first (e.g. select it in Google Lens).', true); return; }
+    applyLabelText(txt);
+  }catch(e){ setScanStatus('Could not read the clipboard — allow the permission and try again.', true); }
+}
+function applyLabelText(txt){
+  const lines = txt.split(/\n+/).map(s=>s.replace(/\s+/g,' ').trim())
+    .filter(s => s && /[A-Za-z]{3}/.test(s));
+  finishLabelRead(lines.map(t=>({text:t, h:0})), txt, 'Pasted.');
+}
+function altScanButtons(){
+  const btns = [];
+  if('BarcodeDetector' in window)
+    btns.push(`<button class="mini-btn quiet" style="margin:0 6px 6px 0" onclick="document.getElementById('barcode-input').click()">Scan barcode</button>`);
+  if(navigator.clipboard && navigator.clipboard.readText)
+    btns.push(`<button class="mini-btn quiet" style="margin:0 6px 6px 0" onclick="pasteLabelText()">Paste copied text</button>`);
+  if(!btns.length) return '';
+  return `<div style="margin-top:10px"><div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:6px">Other ways to fill this in:</div>${btns.join('')}
+    <input type="file" id="barcode-input" accept="image/*" capture="environment" style="display:none" onchange="barcodePicked(this)"></div>`;
 }
 function useOcrLine(btn){
   const el = document.getElementById('f-name') || document.getElementById('t-name');
@@ -880,6 +1052,7 @@ function openWineForm(id, pre){
   const w = id? state.wines.find(x=>x.id===id) : null;
   const p = w || pre || {};
   ui.photo = w?.photo || null;
+  ui.photoOCR = null;
   const v = k => esc(p[k]??'');
   sheetHTML(`
     <h2>${w?'Edit bottle':'Add to the cellar'}</h2>
@@ -951,17 +1124,12 @@ function deleteWine(id){
 function openTastingForm(id, prefillWine, openedInfo){
   const t = id? state.tastings.find(x=>x.id===id) : null;
   ui.photo = t?.photo || (prefillWine?.photo || null);
+  ui.photoOCR = null;
   const today = new Date().toISOString().slice(0,10);
   const name = t? t.name : (prefillWine? prefillWine.name : '');
   const vintage = t? (t.vintage||'') : (prefillWine? (prefillWine.vintage||'') : '');
   const names = [...new Set(state.wines.map(w=>w.name))];
-  const head = openedInfo
-    ? `<h2>Bottle opened ✓</h2>
-       <div style="display:flex;align-items:center;gap:10px;margin:-8px 0 14px">
-         <p style="flex:1;font-size:12.5px;color:var(--muted);font-weight:600">${openedInfo.left} left in the cellar — add a note, or close to skip.</p>
-         <button class="mini-btn quiet" onclick="undoOpen('${openedInfo.wineId}','${openedInfo.consumedId}')">Undo</button>
-       </div>`
-    : `<h2>${t?'Edit tasting':'Tasting note'}</h2>`;
+  const head = openedInfo ? openedHeadHTML(openedInfo) : `<h2>${t?'Edit tasting':'Tasting note'}</h2>`;
   sheetHTML(`
     ${head}
     <div id="photo-holder">${photoBoxHTML()}</div>
@@ -1049,47 +1217,90 @@ async function exportPDF(){
   if(!state.wines.length){ alert('The cellar is empty — nothing to export yet.'); return; }
   try{
     if(!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
-    if(!window.jspdf.jsPDF.API.autoTable) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
   }catch(e){ alert('Could not load the PDF library — an internet connection is needed the first time.'); return; }
 
   const { jsPDF } = window.jspdf;
   const randPdf = n => ('R '+Number(n).toLocaleString('en-ZA',{maximumFractionDigits:0})).replace(/[\u00A0\u202F]/g,' ');
-  const doc = new jsPDF({ orientation:'landscape', unit:'pt', format:'a4' });
+  const doc = new jsPDF({ unit:'pt', format:'a4' });          // portrait wine list
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  const M = 60;
+  const WINE=[110,30,43], INK=[43,38,35], MUT=[130,122,112], LINE=[216,208,190];
   const today = new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
+  let y = 0;
 
-  doc.setFont('times','bold'); doc.setFontSize(24); doc.setTextColor(110,30,43);
-  doc.text('Cellar Book', 40, 46);
-  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(110,110,110);
-  doc.text('Cellar inventory · '+today, 40, 62);
+  function pageHead(){
+    y = 68;
+    doc.setFont('times','bold'); doc.setFontSize(26); doc.setTextColor(...WINE);
+    doc.text('Cellar Book', W/2, y, {align:'center'});
+    y += 17;
+    doc.setFont('times','italic'); doc.setFontSize(11); doc.setTextColor(...MUT);
+    doc.text('Wine list \u00B7 '+today, W/2, y, {align:'center'});
+    y += 12;
+    doc.setDrawColor(...WINE); doc.setLineWidth(1);
+    doc.line(M, y, W-M, y);
+    y += 32;
+  }
+  function ensure(hNeeded){
+    if(y + hNeeded > H - 64){ doc.addPage(); y = 60; }
+  }
+  const fit = (s, maxW) => {
+    if(doc.getTextWidth(s) <= maxW) return s;
+    while(s.length > 3 && doc.getTextWidth(s+'\u2026') > maxW) s = s.slice(0,-1);
+    return s+'\u2026';
+  };
 
-  const order = t => TYPES.indexOf(t);
-  const wines = state.wines.slice().sort((a,b)=> order(a.type)-order(b.type) || (a.name||'').localeCompare(b.name||''));
-  const body = wines.map(w=>{
-    const win = (w.drinkFrom||w.drinkTo)? [w.drinkFrom||'',w.drinkTo||''].filter(Boolean).join('–') : '';
-    const val = (+w.qty||0)*(+w.price||0);
-    return [ w.name||'', w.vintage||'', w.type||'', w.varietal||'', w.region||'', w.location||'',
-             String(w.qty||0), (+w.score>0? String(w.score):''), win,
-             (+w.price>0? randPdf(w.price):''), (val>0? randPdf(val):'') ];
-  });
-  const bottles = wines.reduce((s,w)=>s+(+w.qty||0),0);
-  const totalVal = wines.reduce((s,w)=>s+(+w.qty||0)*(+w.price||0),0);
-  body.push(['TOTAL','','','','','', String(bottles),'','','', totalVal>0? randPdf(totalVal):'']);
+  pageHead();
+  const ORDER = ['Sparkling','Ros\u00E9','White','Red','Dessert','Fortified'];
+  const groups = ORDER
+    .map(t => [t, state.wines.filter(w=>w.type===t).sort((a,b)=>(a.name||'').localeCompare(b.name||''))])
+    .filter(([,list]) => list.length);
 
-  doc.autoTable({
-    startY: 78,
-    head: [['Wine','Vintage','Type','Varietal','Region','Bin','Qty','Score','Window','R / btl','Value']],
-    body,
-    styles: { font:'helvetica', fontSize:8.5, cellPadding:4, textColor:[43,38,35] },
-    headStyles: { fillColor:[110,30,43], textColor:[251,246,239], fontStyle:'bold' },
-    alternateRowStyles: { fillColor:[250,248,243] },
-    columnStyles: { 0:{cellWidth:150,fontStyle:'bold'}, 6:{halign:'right'}, 7:{halign:'right'}, 9:{halign:'right'}, 10:{halign:'right'} },
-    didParseCell: d => { if(d.section==='body' && d.row.index===body.length-1){ d.cell.styles.fontStyle='bold'; d.cell.styles.fillColor=[240,235,224]; } },
-    margin: { left:40, right:40 }
-  });
+  for(const [type, list] of groups){
+    ensure(56);
+    doc.setFont('times','bold'); doc.setFontSize(13); doc.setTextColor(...WINE);
+    doc.text(type.toUpperCase(), W/2, y, {align:'center', charSpace:2.5});
+    y += 8;
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.6);
+    doc.line(W/2-60, y, W/2+60, y);
+    y += 22;
 
-  doc.setFontSize(8); doc.setTextColor(150);
-  doc.text('Generated by Cellar Book', 40, doc.internal.pageSize.getHeight()-24);
-  doc.save('cellarbook-inventory-'+new Date().toISOString().slice(0,10)+'.pdf');
+    for(const w of list){
+      ensure(36);
+      const price = +w.price>0 ? randPdf(w.price) : '';
+      doc.setFont('times','bold'); doc.setFontSize(11.5); doc.setTextColor(...INK);
+      const nm = fit((w.vintage? w.vintage+'   ':'')+(w.name||''), W-2*M-90);
+      doc.text(nm, M, y);
+      if(price){
+        doc.setFont('times','normal');
+        doc.text(price, W-M, y, {align:'right'});
+      }
+      y += 13;
+      const bits = [];
+      if(w.varietal) bits.push(w.varietal);
+      if(w.region) bits.push(w.region);
+      if(w.location) bits.push('Bin '+w.location);
+      bits.push('\u00D7 '+(w.qty||0));
+      if(+w.score>0) bits.push(w.score+' pts');
+      if(w.drinkFrom||w.drinkTo) bits.push('drink '+[w.drinkFrom,w.drinkTo].filter(Boolean).join('\u2013'));
+      doc.setFont('times','italic'); doc.setFontSize(9); doc.setTextColor(...MUT);
+      doc.text(fit(bits.join('  \u00B7  '), W-2*M), M, y);
+      y += 19;
+    }
+    y += 10;
+  }
+
+  ensure(40);
+  const bottles = state.wines.reduce((s,w)=>s+(+w.qty||0),0);
+  const totalVal = state.wines.reduce((s,w)=>s+(+w.qty||0)*(+w.price||0),0);
+  doc.setDrawColor(...LINE); doc.setLineWidth(0.6);
+  doc.line(M, y, W-M, y);
+  y += 18;
+  doc.setFont('times','normal'); doc.setFontSize(10); doc.setTextColor(...MUT);
+  doc.text(bottles+' bottles in the cellar'+(totalVal? ' \u00B7 '+randPdf(totalVal):''), W/2, y, {align:'center'});
+  doc.setFontSize(8);
+  doc.text('Generated by Cellar Book', W/2, H-30, {align:'center'});
+  doc.save('cellarbook-winelist-'+new Date().toISOString().slice(0,10)+'.pdf');
 }
 function importData(input){
   const file = input.files[0]; if(!file) return;

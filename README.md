@@ -16,7 +16,7 @@ You now have a Cellar Book icon on your home screen. It opens full-screen, works
 
 ## What else it tracks
 
-- **Bottles opened.** "Open a bottle" logs the date and price, so Stats shows bottles opened per year and what you've drunk in Rand terms. Stats → View & edit log lets you delete accidental entries (tap +1 on the bottle to restore its stock).
+- **Bottles opened.** "Open a bottle" logs the date and price, so Stats shows bottles opened per year and what you've drunk in Rand terms. Drinking the last bottle removes the wine from the cellar (Undo on the popup brings it back), and opening another bottle of a wine already in your journal won't create a duplicate entry. Stats → View & edit log lets you delete accidental log entries.
 - **Tasting search & history.** Search the journal by wine, vintage or notes; wine cards show a Notes (n) button that jumps to all past tastings of that bottle.
 - **Wishlist.** The Cellar tab has a Cellar / Wishlist toggle for bottles you're hunting; "Bought it" moves a wish straight into the cellar form.
 - **Sorting.** Sort the cellar by newest, drink-by urgency, score, vintage, or name.
@@ -24,7 +24,7 @@ You now have a Cellar Book icon on your home screen. It opens full-screen, works
 
 ## PDF inventory
 
-**Settings → Export cellar as PDF** produces a printable landscape inventory of every wine — vintage, region, bin, quantity, score, drink window, price and total value — handy for insurance records or a cellar door list. Needs internet the first time (it fetches the PDF library), then it's cached.
+**Settings → Export cellar as PDF** produces a restaurant-style wine list — sections in Sparkling → Rosé → White → Red → Dessert → Fortified order, each wine as vintage, name and price with an italic detail line (varietal, region, bin, quantity, score, drink window), plus bottle and value totals. Needs internet the first time (it fetches the PDF library), then it's cached.
 
 ## Backups and Google Drive
 
@@ -33,14 +33,23 @@ You now have a Cellar Book icon on your home screen. It opens full-screen, works
 ## Backups
 
 Your data is stored in the app on your device. Tap **Backup** (top right) → **Export backup** every so often and drop the JSON file in your cloud drive. **Restore from backup** loads it back — including onto a new phone.
+
+## Filling in bottles quickly
+
+Four free routes, all in the bottle and tasting forms:
+
+- **Scan barcode** — point the camera at the EAN on the back label. If the wine is in the free Open Food Facts database, name and producer fill in instantly and exactly. Big producers usually hit; small estates often won't.
+- **Paste copied text** — the best reader on your phone is Google Lens (in your camera or Photos app). Read the label there, copy the text, then tap this button: Cellar Book parses out the vintage and name candidates.
+- **Read label (OCR)** — the built-in reader described below.
+- Or just type it — the wine name field suggests wines already in your cellar.
 
 ## Reading labels from photos
 
-The camera button in the bottle and tasting forms attaches a label photo to the record. Tap **Read label** and on-device OCR fills in the vintage and the most prominent line as the wine name, with the other lines it read shown as tappable suggestions. Everything runs on your phone — nothing is sent anywhere. First use downloads a few MB; it works best on straight-on, well-lit shots of printed labels.
+The camera button in the bottle and tasting forms attaches a label photo to the record. Tap **Read label** and on-device OCR runs a two-pass read (auto layout + sparse text sweep) over an enhanced high-resolution copy of the photo — grayscale, contrast-stretched — then fills in the vintage and the most prominent line as the wine name, with other readable lines as tappable suggestions (boilerplate like volumes and alcohol percentages is filtered out). Everything runs on your phone — nothing is sent anywhere. First use downloads a few MB; a scan takes 15–25 seconds. It still works best on straight-on, well-lit shots — script fonts and heavy foil remain OCR's blind spot.
 
 ## What else it tracks
 
-- **Bottles opened.** "Open a bottle" logs the date and price, so Stats shows bottles opened per year and what you've drunk in Rand terms. Stats → View & edit log lets you delete accidental entries (tap +1 on the bottle to restore its stock).
+- **Bottles opened.** "Open a bottle" logs the date and price, so Stats shows bottles opened per year and what you've drunk in Rand terms. Drinking the last bottle removes the wine from the cellar (Undo on the popup brings it back), and opening another bottle of a wine already in your journal won't create a duplicate entry. Stats → View & edit log lets you delete accidental log entries.
 - **Tasting search & history.** Search the journal by wine, vintage or notes; wine cards show a Notes (n) button that jumps to all past tastings of that bottle.
 - **Wishlist.** The Cellar tab has a Cellar / Wishlist toggle for bottles you're hunting; "Bought it" moves a wish straight into the cellar form.
 - **Sorting.** Sort the cellar by newest, drink-by urgency, score, vintage, or name.
@@ -48,7 +57,7 @@ The camera button in the bottle and tasting forms attaches a label photo to the 
 
 ## PDF inventory
 
-**Settings → Export cellar as PDF** produces a printable landscape inventory of every wine — vintage, region, bin, quantity, score, drink window, price and total value — handy for insurance records or a cellar door list. Needs internet the first time (it fetches the PDF library), then it's cached.
+**Settings → Export cellar as PDF** produces a restaurant-style wine list — sections in Sparkling → Rosé → White → Red → Dessert → Fortified order, each wine as vintage, name and price with an italic detail line (varietal, region, bin, quantity, score, drink window), plus bottle and value totals. Needs internet the first time (it fetches the PDF library), then it's cached.
 
 ## Backups and Google Drive
 
@@ -57,6 +66,15 @@ The camera button in the bottle and tasting forms attaches a label photo to the 
 ## Backups
 
 Your data is stored in the app on your device. Tap **Backup** (top right) → **Export backup** every so often and drop the JSON file in your cloud drive. **Restore from backup** loads it back — including onto a new phone.
+
+## Filling in bottles quickly
+
+Four free routes, all in the bottle and tasting forms:
+
+- **Scan barcode** — point the camera at the EAN on the back label. If the wine is in the free Open Food Facts database, name and producer fill in instantly and exactly. Big producers usually hit; small estates often won't.
+- **Paste copied text** — the best reader on your phone is Google Lens (in your camera or Photos app). Read the label there, copy the text, then tap this button: Cellar Book parses out the vintage and name candidates.
+- **Read label (OCR)** — the built-in reader described below.
+- Or just type it — the wine name field suggests wines already in your cellar.
 
 ## Reading labels from photos
 
