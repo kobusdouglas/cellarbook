@@ -360,6 +360,9 @@ const uid = ()=> Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const YEAR = new Date().getFullYear();
 const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const rand = n => 'R '+Number(n).toLocaleString('en-ZA',{maximumFractionDigits:0});
+const sameWine = (a,b) =>
+  (a?.name||'').trim().toLowerCase() === (b?.name||'').trim().toLowerCase() &&
+  String(a?.vintage||'').trim() === String(b?.vintage||'').trim();
 
 /* ================= drink-window logic ================= */
 function windowStatus(w){
@@ -573,7 +576,7 @@ function cardHTML(w){
   if(w.format && w.format!=='750ml') meta.push(`<span><b>${esc(w.format)}</b></span>`);
   if(w.purchaseDate) meta.push(`<span>Bought ${fmtMonth(w.purchaseDate)}</span>`);
   const score = (+w.score>0)? `<div class="score-badge"><b>${w.score}</b><span>pts</span></div>` : '';
-  const noteCount = state.tastings.filter(t=>(t.name||'').toLowerCase()===(w.name||'').toLowerCase()).length;
+  const noteCount = state.tastings.filter(t=>sameWine(t, w)).length;
   return `
   <div class="card">
     <div class="card-body">
@@ -599,7 +602,8 @@ function cardHTML(w){
 }
 function showTastingsFor(id){
   const w = state.wines.find(x=>x.id===id); if(!w) return;
-  ui.tSearch = w.name; ui.tab = 'tastings'; render();
+  ui.tSearch = (w.name + ' ' + (w.vintage||'')).trim();
+  ui.tab = 'tastings'; render(); armBack();
 }
 function adjustQty(id,d){
   const w = state.wines.find(x=>x.id===id); if(!w) return;
@@ -618,7 +622,7 @@ function drinkOne(id){
   render();                                                    // count updates on screen immediately
   ui.lastOpenedWine = w;
   ui.lastOpenedInfo = { left:+w.qty, wineId:w.id, consumedId:cid, last };
-  const hasNote = state.tastings.some(t=>(t.name||'').toLowerCase()===(w.name||'').toLowerCase());
+  const hasNote = state.tastings.some(t=>sameWine(t, w));
   hasNote ? openOpenedSheet() : openTastingForm(null, w, ui.lastOpenedInfo);
 }
 function openedHeadHTML(info){
@@ -633,17 +637,19 @@ function openedHeadHTML(info){
 }
 function openOpenedSheet(){
   const w = ui.lastOpenedWine, info = ui.lastOpenedInfo;
-  const n = state.tastings.filter(t=>(t.name||'').toLowerCase()===(w.name||'').toLowerCase()).length;
+  const n = state.tastings.filter(t=>sameWine(t, w)).length;
   sheetHTML(`
     ${openedHeadHTML(info)}
-    <p style="font-size:13.5px;margin:2px 0 14px">${esc(w.name)} is already in your journal (${n} note${n===1?'':'s'}) — no new entry was added.</p>
+    <p style="font-size:13.5px;margin:2px 0 14px">${esc(w.name)}${w.vintage?' '+esc(w.vintage):''} is already in your journal (${n} note${n===1?'':'s'}) — no new entry was added.</p>
     <button class="settings-btn" onclick="viewNotesForLastOpened()">View journal notes</button>
     <button class="settings-btn" onclick="addNoteForLastOpened()">Add another note anyway</button>
   `);
 }
 function viewNotesForLastOpened(){
   const w = ui.lastOpenedWine; if(!w) return;
-  closeSheet(); ui.tSearch = w.name; ui.tab = 'tastings'; render(); armBack();
+  closeSheet();
+  ui.tSearch = (w.name + ' ' + (w.vintage||'')).trim();
+  ui.tab = 'tastings'; render(); armBack();
 }
 function addNoteForLastOpened(){
   if(ui.lastOpenedWine) openTastingForm(null, ui.lastOpenedWine, ui.lastOpenedInfo);
@@ -832,8 +838,6 @@ function photoBoxHTML(){
       <input type="file" id="photo-camera" accept="image/*" capture="environment" style="display:none" onchange="photoPicked(this)">
       <input type="file" id="photo-gallery" accept="image/*" style="display:none" onchange="photoPicked(this)">
       <div class="scan-status" id="scan-status"></div>
-      <div id="ocr-chips"></div>
-      ${altScanButtons()}
     </div>`;
   return `
     <div class="f-row"><label>Label photo</label>
@@ -847,7 +851,6 @@ function photoBoxHTML(){
       </div>
       <div class="scan-status" id="scan-status"></div>
       <div id="ocr-chips"></div>
-      ${altScanButtons()}
     </div>`;
 }
 async function photoPicked(input){
@@ -903,20 +906,6 @@ function finishLabelRead(cands, fullText, doneMsg){
   showLineChips(named.map(l=>l.text));
   setScanStatus(doneMsg + (vint ? ' Name and vintage filled in — tap a line to correct.' : ' Tap a line below to correct the name.'));
 }
-async function tryTextDetector(src){
-  if(!('TextDetector' in window)) return null;
-  try{
-    const img = new Image();
-    await new Promise((res,rej)=>{ img.onload = res; img.onerror = rej; img.src = src; });
-    const det = new TextDetector();
-    const found = await det.detect(await createImageBitmap(img));
-    const lines = found
-      .map(t => ({ text: String(t.rawValue||'').replace(/\s+/g,' ').trim(),
-                   h: (t.boundingBox && t.boundingBox.height) || 0 }))
-      .filter(l => l.text && /[A-Za-z]{3}/.test(l.text));
-    return lines.length >= 2 ? lines : null;
-  }catch(e){ return null; }
-}
 function preprocessForOCR(src){
   return new Promise(res=>{
     const img = new Image();
@@ -961,12 +950,6 @@ async function runOCR(){
   try{ await loadTesseract(); }
   catch(e){ setScanStatus('Could not load the OCR library. Check your connection and try again.', true); return; }
   try{
-    setScanStatus('Reading the label…');
-    const fast = await tryTextDetector(src);         // Chrome's native reader, where available
-    if(fast){
-      finishLabelRead(fast, fast.map(l=>l.text).join('\n'), 'Read instantly on-device.');
-      return;
-    }
     setScanStatus('Preparing the photo…');
     const prepped = await preprocessForOCR(src);
     const worker = await getOcrWorker();
@@ -990,56 +973,6 @@ async function runOCR(){
   }catch(e){
     setScanStatus('OCR failed ('+(e.message||'error')+'). Try again or fill in by hand.', true);
   }
-}
-async function barcodePicked(input){
-  const f = input.files[0]; input.value = ''; if(!f) return;
-  setScanStatus('Looking for a barcode…');
-  try{
-    const det = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e'] });
-    const codes = await det.detect(await createImageBitmap(f));
-    if(!codes.length){ setScanStatus('No barcode found — get closer and steadier, with good light on the code.', true); return; }
-    await lookupBarcode(codes[0].rawValue);
-  }catch(e){ setScanStatus('Barcode scan failed ('+(e.message||'error')+').', true); }
-}
-async function lookupBarcode(code){
-  setScanStatus('Barcode '+code+' — looking it up…');
-  try{
-    const r = await fetch('https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+'.json');
-    const j = await r.json();
-    const p = j && j.product;
-    if(!p || !(p.product_name || p.brands)){
-      setScanStatus('Barcode '+code+" isn't in the open product database — fill in by hand or read the label instead.", true);
-      return;
-    }
-    const brand = p.brands ? p.brands.split(',')[0].trim() : '';
-    const name = [brand, p.product_name||''].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
-    const fill = (id,v)=>{ const el = document.getElementById(id); if(el && v && !el.value) el.value = v; };
-    fill('f-name', name); fill('t-name', name);
-    fill('f-producer', brand);
-    setScanStatus('Found: '+name+' — check and adjust.');
-  }catch(e){ setScanStatus('Lookup failed — check your internet connection.', true); }
-}
-async function pasteLabelText(){
-  try{
-    const txt = await navigator.clipboard.readText();
-    if(!txt || !txt.trim()){ setScanStatus('Clipboard is empty — copy the label text first (e.g. select it in Google Lens).', true); return; }
-    applyLabelText(txt);
-  }catch(e){ setScanStatus('Could not read the clipboard — allow the permission and try again.', true); }
-}
-function applyLabelText(txt){
-  const lines = txt.split(/\n+/).map(s=>s.replace(/\s+/g,' ').trim())
-    .filter(s => s && /[A-Za-z]{3}/.test(s));
-  finishLabelRead(lines.map(t=>({text:t, h:0})), txt, 'Pasted.');
-}
-function altScanButtons(){
-  const btns = [];
-  if('BarcodeDetector' in window)
-    btns.push(`<button class="mini-btn quiet" style="margin:0 6px 6px 0" onclick="document.getElementById('barcode-input').click()">Scan barcode</button>`);
-  if(navigator.clipboard && navigator.clipboard.readText)
-    btns.push(`<button class="mini-btn quiet" style="margin:0 6px 6px 0" onclick="pasteLabelText()">Paste copied text</button>`);
-  if(!btns.length) return '';
-  return `<div style="margin-top:10px"><div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:6px">Other ways to fill this in:</div>${btns.join('')}
-    <input type="file" id="barcode-input" accept="image/*" capture="environment" style="display:none" onchange="barcodePicked(this)"></div>`;
 }
 function useOcrLine(btn){
   const el = document.getElementById('f-name') || document.getElementById('t-name');
