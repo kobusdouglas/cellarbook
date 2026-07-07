@@ -872,7 +872,7 @@ function loadTesseract(){
   if(window.Tesseract) return Promise.resolve();
   return new Promise((res,rej)=>{
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js';
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.4/dist/tesseract.min.js';
     s.onload = res; s.onerror = () => rej(new Error('download failed'));
     document.head.appendChild(s);
   });
@@ -940,7 +940,15 @@ function preprocessForOCR(src){
 }
 let ocrWorkerP = null;
 function getOcrWorker(){
-  if(!ocrWorkerP) ocrWorkerP = Tesseract.createWorker('eng');
+  if(!ocrWorkerP){
+    ocrWorkerP = (async () => {
+      const w = await Tesseract.createWorker();      // v4 API: options object, not a language
+      await w.loadLanguage('eng');
+      await w.initialize('eng');
+      return w;
+    })();
+    ocrWorkerP.catch(() => { ocrWorkerP = null; });  // a failed download must not poison retries
+  }
   return ocrWorkerP;
 }
 async function runOCR(){
@@ -952,26 +960,31 @@ async function runOCR(){
   try{
     setScanStatus('Preparing the photo…');
     const prepped = await preprocessForOCR(src);
+    setScanStatus('Loading the language model — first use downloads a few MB…');
     const worker = await getOcrWorker();
     const cands = [], seen = new Set();
-    let fullText = '';
+    let fullText = '', passErr = null;
     for(const psm of ['3','11']){                    // auto layout, then sparse-text sweep
       setScanStatus('Reading the label — pass '+(psm==='3'?'1':'2')+' of 2…');
-      await worker.setParameters({ tessedit_pageseg_mode: psm });
-      const { data } = await worker.recognize(prepped);
-      fullText += '\n' + (data.text || '');
-      for(const l of (data.lines || [])){
-        const text = String(l.text||'').replace(/\s+/g,' ').trim();
-        if(!text || (l.confidence ?? 0) <= 40 || !/[A-Za-z]{3}/.test(text)) continue;
-        const key = text.toLowerCase();
-        if(seen.has(key)) continue;
-        seen.add(key);
-        cands.push({ text, h: l.bbox ? (l.bbox.y1 - l.bbox.y0) : 0 });
-      }
+      try{
+        await worker.setParameters({ tessedit_pageseg_mode: psm });
+        const { data } = await worker.recognize(prepped);
+        fullText += '\n' + (data.text || '');
+        for(const l of (data.lines || [])){
+          const text = String(l.text||'').replace(/\s+/g,' ').trim();
+          if(!text || (l.confidence ?? 0) <= 40 || !/[A-Za-z]{3}/.test(text)) continue;
+          const key = text.toLowerCase();
+          if(seen.has(key)) continue;
+          seen.add(key);
+          cands.push({ text, h: l.bbox ? (l.bbox.y1 - l.bbox.y0) : 0 });
+        }
+      }catch(pe){ passErr = pe; }                    // one bad pass shouldn't sink the other
     }
+    if(!cands.length && passErr) throw passErr;
     finishLabelRead(cands, fullText, 'Done.');
   }catch(e){
-    setScanStatus('OCR failed ('+(e.message||'error')+'). Try again or fill in by hand.', true);
+    const msg = (e && e.message) ? e.message : (typeof e === 'string' && e ? e : 'engine error');
+    setScanStatus('OCR failed ('+msg+'). Check your signal and tap Read label to retry, or fill in by hand.', true);
   }
 }
 function useOcrLine(btn){
