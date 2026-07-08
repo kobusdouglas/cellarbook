@@ -146,9 +146,6 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 16px 1
   border:1px solid var(--line-strong);color:var(--muted);background:var(--card);
 }
 .filter.active{border-color:var(--wine);color:#FBF6EF;background:var(--wine)}
-.seg{display:flex;background:var(--card);border:1px solid var(--line-strong);border-radius:999px;padding:3px;margin-bottom:10px}
-.seg-btn{flex:1;padding:8px;border-radius:999px;font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.04em}
-.seg-btn.active{background:var(--wine);color:#FBF6EF}
 .sort-select{background:var(--card);border:1px solid var(--line-strong);border-radius:12px;padding:0 10px;color:var(--ink);font-size:13px;outline:none;max-width:132px}
 
 /* ---------- tastings ---------- */
@@ -304,7 +301,7 @@ nav.tabs{
 /* ================= storage (IndexedDB, migrates from old localStorage) ================= */
 const LS_KEY='cellarbook-v1';
 let state = { wines:[], tastings:[] };
-let ui = { tab:'cellar', search:'', filter:'All', tSearch:'', photo:null, sort:'recent', cellarMode:'cellar', pendingWish:null };
+let ui = { tab:'cellar', search:'', filter:'All', tSearch:'', tFilterWine:null, photo:null, sort:'recent' };
 
 function idbOpen(){
   return new Promise((res,rej)=>{
@@ -333,7 +330,6 @@ function save(){ idbSet('state', state).catch(()=>{ try{localStorage.setItem(LS_
 function migrate(){
   let dirty = false;
   if(!Array.isArray(state.consumed)){ state.consumed = []; dirty = true; }
-  if(!Array.isArray(state.wishlist)){ state.wishlist = []; dirty = true; }
   if(!state.rating100){
     state.tastings.forEach(t=>{ if(+t.rating>0 && +t.rating<=5) t.rating = +t.rating*20; });
     state.rating100 = true; dirty = true;
@@ -406,7 +402,7 @@ function armBack(){ if(!navArmed){ try{ history.pushState({cb:1},''); navArmed =
 function atRoot(){
   return !document.querySelector('.lightbox')
     && !document.getElementById('sheet').classList.contains('open')
-    && ui.tab === 'cellar' && ui.cellarMode === 'cellar';
+    && ui.tab === 'cellar';
 }
 function maybeDisarm(){
   if(navArmed && atRoot()){ navCleanup = true; history.back(); }
@@ -424,11 +420,13 @@ window.addEventListener('popstate', () => {
   if(lb) lb.remove();
   else if(document.getElementById('sheet').classList.contains('open')) closeSheet();
   else if(ui.tab !== 'cellar'){ ui.tab = 'cellar'; render(); }
-  else if(ui.cellarMode !== 'cellar'){ ui.cellarMode = 'cellar'; render(); }
   if(!atRoot()) armBack();
 });
-function setTab(t){ ui.tab = t; render(); t === 'cellar' ? maybeDisarm() : armBack(); }
-function setCellarMode(m){ ui.cellarMode = m; render(); m === 'cellar' ? maybeDisarm() : armBack(); }
+function setTab(t){
+  if(t === 'tastings') ui.tFilterWine = null;   // tapping the tab shows the full journal
+  ui.tab = t; render();
+  t === 'cellar' ? maybeDisarm() : armBack();
+}
 function render(){
   const act = document.activeElement;
   const keepFocus = (act && (act.id==='cellar-search' || act.id==='tastings-search'))
@@ -452,23 +450,12 @@ function render(){
     }
   }
 }
-function fabAction(){
-  if(ui.tab==='tastings') openTastingForm();
-  else if(ui.tab==='cellar' && ui.cellarMode==='wish') openWishForm();
-  else openWineForm();
-}
+function fabAction(){ ui.tab==='tastings' ? openTastingForm() : openWineForm(); }
 
 /* ================= cellar view ================= */
 const TYPES=['Red','White','Rosé','Sparkling','Dessert','Fortified'];
 function viewCellar(){
   const q = ui.search.toLowerCase();
-  const seg = `
-    <div class="seg">
-      <button class="seg-btn ${ui.cellarMode==='cellar'?'active':''}" onclick="setCellarMode('cellar')">Cellar</button>
-      <button class="seg-btn ${ui.cellarMode==='wish'?'active':''}" onclick="setCellarMode('wish')">Wishlist</button>
-    </div>`;
-  if(ui.cellarMode==='wish') return seg + viewWishlist();
-
   const windowEnd = w => parseInt(w.drinkTo)||parseInt(w.drinkFrom)||9999;
   const sorts = {
     recent:(a,b)=>(b.created||0)-(a.created||0),
@@ -481,7 +468,7 @@ function viewCellar(){
   if(ui.filter!=='All') list = list.filter(w=>w.type===ui.filter);
   if(q) list = list.filter(w=>[w.name,w.producer,w.region,w.varietal,w.vintage].join(' ').toLowerCase().includes(q));
   const bottles = state.wines.reduce((s,w)=>s+(+w.qty||0),0);
-  let html = seg + `
+  let html = `
     <div class="search-row">
       <input id="cellar-search" placeholder="Search the cellar…" value="${esc(ui.search)}" oninput="ui.search=this.value;debouncedRender()">
       <select class="sort-select" onchange="ui.sort=this.value;render()">
@@ -501,72 +488,6 @@ function viewCellar(){
   return html + list.map(cardHTML).join('');
 }
 
-/* ================= wishlist ================= */
-function viewWishlist(){
-  const list = (state.wishlist||[]).slice().sort((a,b)=>(b.created||0)-(a.created||0));
-  let html = `<div class="section-head"><span class="eyebrow">Bottles wanted</span><span class="count">${list.length}</span></div>`;
-  if(!list.length) return html + emptyState('❦','Nothing on the wishlist yet.<br>Add the bottles you are hunting for.','Add a wish','openWishForm()');
-  return html + list.map(w=>{
-    const meta=[];
-    if(w.region) meta.push(`<span>${esc(w.region)}</span>`);
-    if(+w.price>0) meta.push(`<span>Target <b>${rand(w.price)}</b></span>`);
-    return `
-    <div class="card">
-      <div class="card-top">
-        <div>
-          <div class="wine-name" style="font-size:18px">${esc(w.name)}</div>
-          <div class="wine-sub">${esc(w.producer||'')}${w.producer&&w.vintage?' · ':''}${esc(w.vintage||'')}</div>
-        </div>
-      </div>
-      ${meta.length?`<div class="card-meta">${meta.join('')}</div>`:''}
-      ${w.notes?`<div class="tasting-notes">${esc(w.notes)}</div>`:''}
-      <div class="card-actions">
-        <button class="chip-btn wine" onclick="buyWish('${w.id}')">Bought it</button>
-        <button class="chip-btn" onclick="openWishForm('${w.id}')">Edit</button>
-        <button class="chip-btn" onclick="deleteWish('${w.id}')">Delete</button>
-      </div>
-    </div>`;}).join('');
-}
-function openWishForm(id){
-  const w = id? state.wishlist.find(x=>x.id===id) : null;
-  const v = k => esc(w?.[k]??'');
-  sheetHTML(`
-    <h2>${w?'Edit wish':'Add to wishlist'}</h2>
-    <div class="f-row"><label>Wine name</label><input id="w-name" value="${v('name')}" placeholder="e.g. Meerlust Rubicon"></div>
-    <div class="f-split">
-      <div class="f-row"><label>Producer</label><input id="w-producer" value="${v('producer')}"></div>
-      <div class="f-row"><label>Vintage</label><input id="w-vintage" inputmode="numeric" value="${v('vintage')}"></div>
-    </div>
-    <div class="f-split">
-      <div class="f-row"><label>Region</label><input id="w-region" value="${v('region')}"></div>
-      <div class="f-row"><label>Target price (R)</label><input id="w-price" inputmode="decimal" value="${v('price')}"></div>
-    </div>
-    <div class="f-row"><label>Notes</label><textarea id="w-notes" placeholder="Where to find it, who recommended it…">${v('notes')}</textarea></div>
-    <button class="primary-btn" onclick="saveWish('${id||''}')">${w?'Save changes':'Add to wishlist'}</button>
-    ${w?`<button class="danger-link" onclick="deleteWish('${id}')">Remove from wishlist</button>`:''}
-  `);
-}
-function saveWish(id){
-  const g = i => document.getElementById(i).value.trim();
-  const name = g('w-name');
-  if(!name){ alert('Give the wine a name.'); return; }
-  const data = { name, producer:g('w-producer'), vintage:g('w-vintage'),
-                 region:g('w-region'), price:parseFloat(g('w-price'))||'', notes:g('w-notes') };
-  if(id){ Object.assign(state.wishlist.find(x=>x.id===id), data); }
-  else { state.wishlist.push({ id:uid(), created:Date.now(), ...data }); }
-  save(); closeSheet(); render();
-}
-function deleteWish(id){
-  if(!confirm('Remove this bottle from the wishlist?')) return;
-  state.wishlist = state.wishlist.filter(w=>w.id!==id);
-  save(); closeSheet(); render();
-}
-function buyWish(id){
-  const wsh = state.wishlist.find(x=>x.id===id); if(!wsh) return;
-  ui.pendingWish = id;
-  openWineForm(null, { name:wsh.name, producer:wsh.producer, vintage:wsh.vintage,
-                       region:wsh.region, price:wsh.price, notes:wsh.notes });
-}
 function cardHTML(w){
   const meta=[];
   if(w.varietal) meta.push(`<span><b>${esc(w.varietal)}</b></span>`);
@@ -602,9 +523,11 @@ function cardHTML(w){
 }
 function showTastingsFor(id){
   const w = state.wines.find(x=>x.id===id); if(!w) return;
-  ui.tSearch = (w.name + ' ' + (w.vintage||'')).trim();
+  ui.tFilterWine = { name: w.name, vintage: w.vintage||'' };
+  ui.tSearch = '';
   ui.tab = 'tastings'; render(); armBack();
 }
+function clearTastingFilter(){ ui.tFilterWine = null; render(); }
 function adjustQty(id,d){
   const w = state.wines.find(x=>x.id===id); if(!w) return;
   w.qty = Math.max(0,(+w.qty||0)+d); save(); render();
@@ -648,7 +571,8 @@ function openOpenedSheet(){
 function viewNotesForLastOpened(){
   const w = ui.lastOpenedWine; if(!w) return;
   closeSheet();
-  ui.tSearch = (w.name + ' ' + (w.vintage||'')).trim();
+  ui.tFilterWine = { name: w.name, vintage: w.vintage||'' };
+  ui.tSearch = '';
   ui.tab = 'tastings'; render(); armBack();
 }
 function addNoteForLastOpened(){
@@ -674,10 +598,13 @@ let rT; function debouncedRender(){ clearTimeout(rT); rT=setTimeout(render,220);
 function viewTastings(){
   const q = (ui.tSearch||'').toLowerCase();
   let list = state.tastings.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  if(q) list = list.filter(t=>[t.name,t.vintage,t.notes].join(' ').toLowerCase().includes(q));
+  if(ui.tFilterWine) list = list.filter(t=>sameWine(t, ui.tFilterWine));
+  if(q) list = list.filter(t=>[t.name,t.producer,t.vintage,t.varietal,t.region,t.notes].join(' ').toLowerCase().includes(q));
+  const fw = ui.tFilterWine;
   let html = `
     <div class="search-row"><input id="tastings-search" placeholder="Search tastings…" value="${esc(ui.tSearch)}"
       oninput="ui.tSearch=this.value;debouncedRender()"></div>
+    ${fw?`<div style="margin:-2px 2px 10px"><button class="mini-btn" onclick="clearTastingFilter()">Showing ${esc(fw.name)}${fw.vintage?' '+esc(fw.vintage):''} &nbsp;✕</button></div>`:''}
     <div class="section-head"><span class="eyebrow">Tasting journal</span><span class="count">${list.length} entr${list.length===1?'y':'ies'}</span></div>`;
   if(!state.tastings.length) return html + emptyState('✎','No tastings recorded yet.<br>Open a bottle, or add a note for a wine tasted elsewhere.','Add a tasting','openTastingForm()');
   if(!list.length) return html + emptyState('✎','No tastings match this search.');
@@ -687,6 +614,7 @@ function viewTastings(){
         ${t.photo?`<img class="thumb" src="${t.photo}" onclick="lightbox('${t.id}','tastings')" alt="Label">`:''}
         <div>
           <div class="wine-name" style="font-size:18px">${esc(t.name)}${t.vintage?' <span style="color:var(--muted);font-weight:500">'+esc(t.vintage)+'</span>':''}</div>
+          ${(t.producer||t.varietal||t.region)?`<div class="wine-sub">${t.type?`<span class="type-dot t-${t.type}"></span>`:''}${[t.producer,t.varietal,t.region].filter(Boolean).map(esc).join(' · ')}</div>`:''}
           <div class="tasting-date">${fmtDate(t.date)}</div>
         </div>
         ${+t.rating>0?`<div class="score-badge ochre"><b>${t.rating}</b><span>pts</span></div>`:''}
@@ -762,6 +690,7 @@ function viewStats(){
       <div class="stat-tile"><div class="v">${avgTasting}</div><div class="l">Avg tasting</div></div>
     </div>
     ${typeBars?`<div class="panel-block"><h3>Bottles by type</h3>${typeBars}</div>`:''}
+    ${maturityPanel()}
     ${regions.length?`<div class="panel-block"><h3>Top regions</h3>${regions.map(([r,n])=>
       `<div class="plain-row"><span>${esc(r)}</span><span>${n} btls</span></div>`).join('')}</div>`:''}
     ${consumptionPanel()}
@@ -773,6 +702,30 @@ function viewStats(){
     </div>`;
 }
 
+function maturityPanel(){
+  const wines = state.wines.filter(w => (+w.qty||0) > 0 && (parseInt(w.drinkFrom) || parseInt(w.drinkTo)));
+  if(!wines.length) return '';
+  let maxTo = YEAR;
+  wines.forEach(w => { const t = parseInt(w.drinkTo) || parseInt(w.drinkFrom); if(t > maxTo) maxTo = t; });
+  const span = Math.min(maxTo, YEAR + 11);
+  const counts = [];
+  for(let y = YEAR; y <= span; y++){
+    let n = 0;
+    wines.forEach(w => {
+      const f = parseInt(w.drinkFrom) || parseInt(w.drinkTo);
+      const t = parseInt(w.drinkTo) || parseInt(w.drinkFrom);
+      if(y >= f && y <= t) n += (+w.qty||0);
+    });
+    counts.push([y, n]);
+  }
+  const max = Math.max(...counts.map(c => c[1]), 1);
+  const rows = counts.map(([y, n]) =>
+    `<div class="bar-row"><div class="bl">${y}${y===YEAR?' ●':''}</div><div class="bt"><div class="bf" style="width:${n/max*100}%${y===YEAR?';background:var(--vine)':''}"></div></div><div class="bv">${n}</div></div>`).join('');
+  const trunc = maxTo > span ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Windows extend to ${maxTo}</div>` : '';
+  return `<div class="panel-block"><h3>Maturity timeline</h3>
+    <div style="font-size:11.5px;color:var(--muted);margin:-6px 0 10px">Bottles in their drinking window, per year</div>
+    ${rows}${trunc}</div>`;
+}
 function consumptionPanel(){
   const consumed = state.consumed||[];
   if(!consumed.length) return '';
@@ -1055,8 +1008,7 @@ function saveWine(id){
   if(id){ Object.assign(state.wines.find(x=>x.id===id), data); }
   else {
     state.wines.push({ id:uid(), created:Date.now(), ...data });
-    if(ui.pendingWish){ state.wishlist = state.wishlist.filter(x=>x.id!==ui.pendingWish); ui.pendingWish = null; }
-    ui.tab = 'cellar'; ui.cellarMode = 'cellar';   // show the new bottle
+    ui.tab = 'cellar';                             // show the new bottle
   }
   save(); closeSheet(); render();
 }
@@ -1069,22 +1021,30 @@ function deleteWine(id){
 /* ================= tasting form ================= */
 function openTastingForm(id, prefillWine, openedInfo){
   const t = id? state.tastings.find(x=>x.id===id) : null;
+  const p = t || prefillWine || {};
+  const v = k => esc(p[k]??'');
   ui.photo = t?.photo || (prefillWine?.photo || null);
   ui.photoOCR = null;
   const today = new Date().toISOString().slice(0,10);
-  const name = t? t.name : (prefillWine? prefillWine.name : '');
-  const vintage = t? (t.vintage||'') : (prefillWine? (prefillWine.vintage||'') : '');
   const names = [...new Set(state.wines.map(w=>w.name))];
   const head = openedInfo ? openedHeadHTML(openedInfo) : `<h2>${t?'Edit tasting':'Tasting note'}</h2>`;
   sheetHTML(`
     ${head}
     <div id="photo-holder">${photoBoxHTML()}</div>
     <div class="f-row"><label>Wine</label>
-      <input id="t-name" value="${esc(name)}" list="wine-names" placeholder="Wine name">
+      <input id="t-name" value="${v('name')}" list="wine-names" placeholder="Wine name">
       <datalist id="wine-names">${names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
     </div>
     <div class="f-split">
-      <div class="f-row"><label>Vintage</label><input id="t-vintage" inputmode="numeric" value="${esc(vintage)}"></div>
+      <div class="f-row"><label>Producer</label><input id="t-producer" value="${v('producer')}" placeholder="Kanonkop"></div>
+      <div class="f-row"><label>Vintage</label><input id="t-vintage" inputmode="numeric" value="${v('vintage')}"></div>
+    </div>
+    <div class="f-split">
+      <div class="f-row"><label>Type</label><select id="t-type">${TYPES.map(x=>`<option ${p.type===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="f-row"><label>Varietal / blend</label><input id="t-varietal" value="${v('varietal')}" placeholder="Bordeaux blend"></div>
+    </div>
+    <div class="f-split">
+      <div class="f-row"><label>Region</label><input id="t-region" value="${v('region')}" placeholder="Stellenbosch"></div>
       <div class="f-row"><label>Date</label><input id="t-date" type="date" value="${t?t.date:today}"></div>
     </div>
     <div class="f-split">
@@ -1101,7 +1061,9 @@ function saveTasting(id){
   if(!name){ alert('Which wine did you taste?'); return; }
   let rating = parseInt(g('t-rating'))||0;
   rating = Math.min(100, Math.max(0, rating));
-  const data = { name, vintage:g('t-vintage'), date:g('t-date'), rating, notes:g('t-notes'), photo: ui.photo||null };
+  const data = { name, producer:g('t-producer'), vintage:g('t-vintage'),
+    type:document.getElementById('t-type').value, varietal:g('t-varietal'), region:g('t-region'),
+    date:g('t-date'), rating, notes:g('t-notes'), photo: ui.photo||null };
   if(id){ Object.assign(state.tastings.find(x=>x.id===id), data); }
   else { state.tastings.push({ id:uid(), ...data }); }
   save(); closeSheet(); ui.tab='tastings'; render();
@@ -1120,6 +1082,9 @@ function openSettings(){
     <h2>Settings</h2>
     <p style="font-size:12.5px;font-weight:600;margin:-6px 0 12px;color:${b.warn?'var(--ochre)':'var(--muted)'}">${b.msg}${b.warn?' Time for a fresh one.':''}</p>
     <button class="settings-btn" onclick="exportPDF()">Export cellar as PDF<small>A printable inventory: every wine with vintage, region, bin, quantity, score, drink window and value.</small></button>
+    <button class="settings-btn" onclick="exportCSV()">Export cellar as CSV<small>Spreadsheet-ready — every bottle and field, for Excel or Power BI.</small></button>
+    <button class="settings-btn" onclick="document.getElementById('csv-file').click()">Import cellar from CSV<small>Bulk-load bottles from a spreadsheet. Shows a preview before anything is added; existing wines (same name + vintage) get their quantities topped up.</small></button>
+    <input type="file" id="csv-file" accept=".csv,text/csv" style="display:none" onchange="csvPicked(this)">
     <button class="settings-btn" onclick="shareBackup()">Share backup<small>Sends the backup to Google Drive, email or WhatsApp via the share sheet (as a .txt file — restore accepts it as-is).</small></button>
     <button class="settings-btn" onclick="exportData()">Export backup<small>Download everything (incl. photos) as a JSON file — keep a copy in your cloud drive.</small></button>
     <button class="settings-btn" onclick="document.getElementById('import-file').click()">Restore from backup<small>Load a previously exported JSON file. Replaces current data.</small></button>
@@ -1248,6 +1213,172 @@ async function exportPDF(){
   doc.text('Generated by Cellar Book', W/2, H-30, {align:'center'});
   doc.save('cellarbook-winelist-'+new Date().toISOString().slice(0,10)+'.pdf');
 }
+/* ---- CSV import / export ---- */
+function parseCSV(text){
+  const rows = []; let row = [], field = '', inQ = false;
+  text = String(text||'').replace(/^\uFEFF/, '');
+  for(let i = 0; i < text.length; i++){
+    const c = text[i];
+    if(inQ){
+      if(c === '"'){ if(text[i+1] === '"'){ field += '"'; i++; } else inQ = false; }
+      else field += c;
+    }else{
+      if(c === '"') inQ = true;
+      else if(c === ','){ row.push(field); field = ''; }
+      else if(c === '\n' || c === '\r'){
+        if(c === '\r' && text[i+1] === '\n') i++;
+        row.push(field); field = '';
+        if(row.length > 1 || row[0] !== '') rows.push(row);
+        row = [];
+      }
+      else field += c;
+    }
+  }
+  if(field !== '' || row.length){ row.push(field); if(row.length > 1 || row[0] !== '') rows.push(row); }
+  return rows;
+}
+function buildImportPlan(rows){
+  if(!rows || rows.length < 2) return { error: 'No data rows found — the file needs a header row plus at least one wine.' };
+  const headers = rows[0].map(x => String(x||'').toLowerCase().replace(/[^a-z]/g, ''));
+  const H = {
+    name:['name','wine','winename'], producer:['producer','winery','estate','brand'], vintage:['vintage','year'],
+    type:['type','colour','color','category','style'], varietal:['varietal','blend','grape','grapes','cultivar','variety'],
+    region:['region','area','appellation','origin'], location:['bin','location','rack','position','slot'],
+    qty:['qty','quantity','bottles','count','stock','units'], price:['price','priceperbottle','cost','unitprice','rbtl','pricebtl','pricer'],
+    format:['format','size','bottlesize'], score:['score','rating','points','pts'],
+    drinkFrom:['drinkfrom','from','windowfrom','start','drinkafter'], drinkTo:['drinkto','drinkby','to','windowto','end','until'],
+    purchaseDate:['purchasedate','bought','datepurchased','purchased','dateofpurchase'], notes:['notes','comments','remarks','note']
+  };
+  const idx = {}, matched = [], ignored = [];
+  headers.forEach((hh, i) => {
+    const k = Object.keys(H).find(k => H[k].includes(hh));
+    if(k !== undefined && idx[k] === undefined){ idx[k] = i; matched.push(rows[0][i]); }
+    else ignored.push(rows[0][i]);
+  });
+  if(idx.name === undefined) return { error: 'Could not find a "Name" column. The header row needs at least a Name column — download the template to see the expected layout.' };
+  const typeMap = s => { s = String(s||'').toLowerCase().replace(/\s/g, '');
+    if(/spark|mcc|capclass|champ|bubbl/.test(s)) return 'Sparkling';
+    if(/ros/.test(s)) return 'Rosé';
+    if(/white|blanc/.test(s)) return 'White';
+    if(/red|rouge/.test(s)) return 'Red';
+    if(/dessert|sweet|noble|latehar/.test(s)) return 'Dessert';
+    if(/fort|port|sherry|jerepi/.test(s)) return 'Fortified';
+    return null; };
+  const fmtMap = s => { s = String(s||'').toLowerCase();
+    if(!s) return '750ml';
+    if(s.includes('375')) return '375ml Half';
+    if(s.includes('500')) return '500ml';
+    if(/3\s*l|double/.test(s)) return '3L Double magnum';
+    if(/1\.5|magnum/.test(s)) return '1.5L Magnum';
+    return '750ml'; };
+  const dateNorm = s => { s = String(s||'').trim(); if(!s) return '';
+    let m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+    if(m) return m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0');
+    m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+    if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+    return ''; };
+  const get = (r, k) => idx[k] === undefined ? '' : String(r[idx[k]] ?? '').trim();
+  const adds = [], updates = []; let skipped = 0, badType = 0;
+  for(let i = 1; i < rows.length; i++){
+    const r = rows[i];
+    if(!r || r.every(c => String(c||'').trim() === '')) continue;
+    const name = get(r, 'name');
+    if(!name){ skipped++; continue; }
+    const rawType = get(r, 'type');
+    let type = typeMap(rawType);
+    if(rawType && !type) badType++;
+    if(!type) type = 'Red';
+    const qraw = get(r, 'qty');
+    const qty = qraw === '' ? 1 : Math.max(0, parseInt(qraw.replace(/[^\d]/g, '')) || 0);
+    const scn = parseInt(get(r, 'score'));
+    const w = {
+      name, producer:get(r,'producer'),
+      vintage:get(r,'vintage').replace(/[^\d]/g,'').slice(0,4),
+      type, varietal:get(r,'varietal'), region:get(r,'region'), location:get(r,'location'),
+      qty, price: parseFloat(get(r,'price').replace(/[^\d.]/g,'')) || '',
+      format: fmtMap(get(r,'format')),
+      score: scn > 0 ? Math.min(100, scn) : '',
+      drinkFrom:get(r,'drinkFrom').replace(/[^\d]/g,'').slice(0,4),
+      drinkTo:get(r,'drinkTo').replace(/[^\d]/g,'').slice(0,4),
+      purchaseDate: dateNorm(get(r,'purchaseDate')), notes:get(r,'notes'), photo:null
+    };
+    const ex = state.wines.find(x => sameWine(x, w));
+    if(ex) updates.push({ id: ex.id, w }); else adds.push(w);
+  }
+  return { adds, updates, skipped, badType, matched, ignored };
+}
+function processCsvText(text){
+  ui.csvPlan = buildImportPlan(parseCSV(text));
+  openCsvPreview();
+}
+function csvPicked(input){
+  const f = input.files[0]; input.value = ''; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => processCsvText(r.result);
+  r.readAsText(f);
+}
+function openCsvPreview(){
+  const p = ui.csvPlan;
+  if(!p) return;
+  if(p.error){
+    sheetHTML(`<h2>Import cellar from CSV</h2>
+      <p style="font-size:13.5px;color:var(--wine);font-weight:600;margin-bottom:14px">${esc(p.error)}</p>
+      <button class="settings-btn" onclick="downloadCsvTemplate()">Download a template CSV<small>The headers the import understands, with an example row.</small></button>`);
+    return;
+  }
+  const li = (label, val) => `<div class="plain-row"><span>${label}</span><span>${val}</span></div>`;
+  sheetHTML(`<h2>Ready to import</h2>
+    ${li('New wines to add', p.adds.length)}
+    ${li('Existing wines to top up', p.updates.length)}
+    ${p.skipped ? li('Rows skipped (no name)', p.skipped) : ''}
+    ${p.badType ? li('Unrecognised type — set to Red', p.badType) : ''}
+    <div style="font-size:11.5px;color:var(--muted);margin:10px 0 4px">Columns matched: ${p.matched.map(esc).join(', ') || 'none'}</div>
+    ${p.ignored.length ? `<div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">Ignored: ${p.ignored.map(esc).join(', ')}</div>` : '<div style="height:8px"></div>'}
+    <button class="primary-btn" onclick="applyCsvImport()">Import now</button>
+    <button class="danger-link" onclick="ui.csvPlan=null;closeSheet()">Cancel</button>
+    <div style="text-align:center;margin-top:6px"><button class="mini-btn quiet" onclick="downloadCsvTemplate()">Download a template CSV</button></div>`);
+}
+function applyCsvImport(){
+  const p = ui.csvPlan; if(!p || p.error) return;
+  p.adds.forEach(w => state.wines.push({ id: uid(), created: Date.now(), ...w }));
+  p.updates.forEach(u => {
+    const ex = state.wines.find(x => x.id === u.id); if(!ex) return;
+    ex.qty = (+ex.qty||0) + (+u.w.qty||0);
+    ['producer','varietal','region','location','price','format','score','drinkFrom','drinkTo','purchaseDate','notes']
+      .forEach(k => { if((ex[k] === '' || ex[k] == null) && u.w[k] !== '' && u.w[k] != null) ex[k] = u.w[k]; });
+  });
+  const msg = 'Added '+p.adds.length+' new wine'+(p.adds.length===1?'':'s')+', topped up '+p.updates.length+', skipped '+p.skipped+'.';
+  ui.csvPlan = null;
+  save(); render();
+  sheetHTML(`<h2>Import complete</h2><p style="font-size:13.5px;margin-bottom:14px">${msg}</p>
+    <button class="primary-btn" onclick="closeSheet()">Done</button>`);
+}
+const csvEsc = v => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
+function buildCSV(){
+  const head = ['Name','Producer','Vintage','Type','Varietal','Region','Bin','Qty','Price','Format','Score','Drink From','Drink To','Purchase Date','Notes'];
+  const lines = [head.join(',')];
+  state.wines.forEach(w => lines.push([w.name, w.producer, w.vintage, w.type, w.varietal, w.region, w.location,
+    w.qty||0, w.price||'', w.format||'', w.score||'', w.drinkFrom||'', w.drinkTo||'', w.purchaseDate||'', w.notes||''
+  ].map(csvEsc).join(',')));
+  return '\uFEFF' + lines.join('\r\n');
+}
+function exportCSV(){
+  if(!state.wines.length){ alert('The cellar is empty — nothing to export yet.'); return; }
+  const blob = new Blob([buildCSV()], { type:'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cellarbook-cellar-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function downloadCsvTemplate(){
+  const csv = '\uFEFFName,Producer,Vintage,Type,Varietal,Region,Bin,Qty,Price,Format,Score,Drink From,Drink To,Purchase Date,Notes\r\n' +
+    'Kanonkop Paul Sauer,Kanonkop,2019,Red,Bordeaux blend,Stellenbosch,Rack A,3,650,750ml,95,2025,2040,10/03/2024,Birthday wine\r\n';
+  const blob = new Blob([csv], { type:'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cellarbook-template.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+}
 function importData(input){
   const file = input.files[0]; if(!file) return;
   const r = new FileReader();
@@ -1275,7 +1406,6 @@ function sheetHTML(inner){
   armBack();
 }
 function closeSheet(){
-  ui.pendingWish = null;
   document.getElementById('sheet').classList.remove('open');
   document.getElementById('backdrop').classList.remove('open');
   maybeDisarm();

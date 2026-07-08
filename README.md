@@ -18,15 +18,20 @@ You now have a Cellar Book icon on your home screen. It opens full-screen, works
 
 - **Cellar.** Bottles with producer, vintage, type, varietal, region, bin location, quantity, price (ZAR), bottle format (halves to double magnums), purchase date, a score /100, and a drink-from/drink-by window shown as a gauge on every card. Search, filter by type, and sort by newest, drink-by urgency, score, vintage, or A–Z.
 - **Opening a bottle.** Tap "Open a bottle": stock drops instantly, the date and price are logged, and a confirmation sheet offers an optional tasting note — with **Undo** if it was a mis-tap. Drinking the last bottle removes the wine from the cellar (Undo brings it back). A wine is identified by **name + vintage**, so the 2020 is treated separately from the 2019. If that exact wine and vintage is already in your journal, no duplicate entry is created — you can view the existing notes or deliberately add another.
-- **Tastings.** Journal entries with a score /100, date, notes, and photo. Search by wine, vintage, or note text. Wine cards show a **Notes (n)** button that jumps to that bottle's history.
+- **Tastings.** Journal entries carry the same wine identity as the cellar — producer, vintage, type, varietal, region — plus a score /100, date, notes, and photo, all prefilled when you open a bottle from the cellar. Search across every field. Wine cards show a **Notes (n)** button that filters the journal to that exact wine and vintage (tap the chip to clear).
 - **Alerts.** Wines whose drinking window closes within a year, and wines past their window, with a badge on the tab.
-- **Stats.** Bottles, cellar value, average scores, breakdown by type, top regions, journal highlights, and a **Bottles opened** panel with per-year bars and Rand totals. **View & edit log** lets you delete accidental entries (tap +1 on the bottle to restore its stock).
-- **Wishlist.** A Cellar/Wishlist toggle for bottles you're hunting; **Bought it** carries a wish straight into the add-bottle form and clears it on save.
+- **Stats.** Bottles, cellar value, average scores, breakdown by type, a **maturity timeline** (bottles in their drinking window per year, current year highlighted — shows at a glance where your cellar is over- or under-stocked), top regions, journal highlights, and a **Bottles opened** panel with per-year bars and Rand totals. **View & edit log** lets you delete accidental entries (tap +1 on the bottle to restore its stock).
 - **Back button.** Android's back steps through the app — closes photos and forms, returns to the Cellar tab — instead of exiting.
 
 ## Reading labels from photos
 
 The camera button in the bottle and tasting forms attaches a label photo (take one or choose from the gallery). Tap **Read label** and on-device OCR runs a two-pass read over an enhanced high-resolution copy of the photo, then fills in the vintage and the most prominent line as the wine name, with other readable lines as tappable suggestions (volumes and alcohol percentages are filtered out). Everything runs on your phone — nothing is sent anywhere. First use downloads a few MB; a scan takes 15–25 seconds. It works best on straight-on, well-lit shots of printed labels; script fonts and heavy foil remain OCR's blind spot.
+
+## Spreadsheets: CSV import & export
+
+**Settings → Import cellar from CSV** bulk-loads bottles from a spreadsheet — the fastest way to get a real cellar in. It matches columns by name (Name is required; Producer, Vintage, Type, Varietal, Region, Bin, Qty, Price, Format, Score, Drink From, Drink To, Purchase Date, Notes all recognised under common spellings), understands SA conventions ("R 1 250" prices, dd/mm/yyyy dates, "MCC" as Sparkling), and shows a preview with counts before anything is written. Wines matching an existing name + vintage get their quantities topped up rather than duplicated. A template CSV is downloadable from the preview.
+
+**Export cellar as CSV** produces a spreadsheet of every bottle and field — ready for Excel or Power BI.
 
 ## PDF wine list
 
