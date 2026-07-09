@@ -356,6 +356,10 @@ const uid = ()=> Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const YEAR = new Date().getFullYear();
 const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const rand = n => 'R '+Number(n).toLocaleString('en-ZA',{maximumFractionDigits:0});
+const normVintage = s => {
+  s = String(s||'').trim();
+  return /^(n\.?\s?v\.?|non[\s-]?vintage)$/i.test(s) ? 'NV' : s;
+};
 const sameWine = (a,b) =>
   (a?.name||'').trim().toLowerCase() === (b?.name||'').trim().toLowerCase() &&
   String(a?.vintage||'').trim() === String(b?.vintage||'').trim();
@@ -466,7 +470,7 @@ function viewCellar(){
   };
   let list = state.wines.slice().sort(sorts[ui.sort]||sorts.recent);
   if(ui.filter!=='All') list = list.filter(w=>w.type===ui.filter);
-  if(q) list = list.filter(w=>[w.name,w.producer,w.region,w.varietal,w.vintage].join(' ').toLowerCase().includes(q));
+  if(q) list = list.filter(w=>[w.name,w.producer,w.region,w.country,w.varietal,w.vintage].join(' ').toLowerCase().includes(q));
   const bottles = state.wines.reduce((s,w)=>s+(+w.qty||0),0);
   let html = `
     <div class="search-row">
@@ -492,6 +496,7 @@ function cardHTML(w){
   const meta=[];
   if(w.varietal) meta.push(`<span><b>${esc(w.varietal)}</b></span>`);
   if(w.region)   meta.push(`<span>${esc(w.region)}</span>`);
+  if(w.country)  meta.push(`<span>${esc(w.country)}</span>`);
   if(w.location) meta.push(`<span>Bin <b>${esc(w.location)}</b></span>`);
   if(w.price)    meta.push(`<span><b>${rand(w.price)}</b>/btl</span>`);
   if(w.format && w.format!=='750ml') meta.push(`<span><b>${esc(w.format)}</b></span>`);
@@ -599,7 +604,7 @@ function viewTastings(){
   const q = (ui.tSearch||'').toLowerCase();
   let list = state.tastings.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   if(ui.tFilterWine) list = list.filter(t=>sameWine(t, ui.tFilterWine));
-  if(q) list = list.filter(t=>[t.name,t.producer,t.vintage,t.varietal,t.region,t.notes].join(' ').toLowerCase().includes(q));
+  if(q) list = list.filter(t=>[t.name,t.producer,t.vintage,t.varietal,t.region,t.country,t.notes].join(' ').toLowerCase().includes(q));
   const fw = ui.tFilterWine;
   let html = `
     <div class="search-row"><input id="tastings-search" placeholder="Search tastings…" value="${esc(ui.tSearch)}"
@@ -614,7 +619,7 @@ function viewTastings(){
         ${t.photo?`<img class="thumb" src="${t.photo}" onclick="lightbox('${t.id}','tastings')" alt="Label">`:''}
         <div>
           <div class="wine-name" style="font-size:18px">${esc(t.name)}${t.vintage?' <span style="color:var(--muted);font-weight:500">'+esc(t.vintage)+'</span>':''}</div>
-          ${(t.producer||t.varietal||t.region)?`<div class="wine-sub">${t.type?`<span class="type-dot t-${t.type}"></span>`:''}${[t.producer,t.varietal,t.region].filter(Boolean).map(esc).join(' · ')}</div>`:''}
+          ${(t.producer||t.varietal||t.region)?`<div class="wine-sub">${t.type?`<span class="type-dot t-${t.type}"></span>`:''}${[t.producer,t.varietal,t.region,t.country].filter(Boolean).map(esc).join(' · ')}</div>`:''}
           <div class="tasting-date">${fmtDate(t.date)}</div>
         </div>
         ${+t.rating>0?`<div class="score-badge ochre"><b>${t.rating}</b><span>pts</span></div>`:''}
@@ -959,27 +964,27 @@ function openWineForm(id, pre){
     <div class="f-row"><label>Wine name</label><input id="f-name" value="${v('name')}" placeholder="e.g. Kanonkop Paul Sauer"></div>
     <div class="f-split">
       <div class="f-row"><label>Producer</label><input id="f-producer" value="${v('producer')}" placeholder="Kanonkop"></div>
-      <div class="f-row"><label>Vintage</label><input id="f-vintage" inputmode="numeric" value="${v('vintage')}" placeholder="2019"></div>
+      <div class="f-row"><label>Vintage</label><input id="f-vintage" value="${v('vintage')}" placeholder="2019 or NV"></div>
     </div>
     <div class="f-split">
       <div class="f-row"><label>Type</label><select id="f-type">${TYPES.map(t=>`<option ${p.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
       <div class="f-row"><label>Varietal / blend</label><input id="f-varietal" value="${v('varietal')}" placeholder="Bordeaux blend"></div>
     </div>
     <div class="f-split">
+      <div class="f-row"><label>Country</label><input id="f-country" value="${v('country')}" placeholder="South Africa"></div>
       <div class="f-row"><label>Region</label><input id="f-region" value="${v('region')}" placeholder="Stellenbosch"></div>
+    </div>
+    <div class="f-split">
       <div class="f-row"><label>Bin / location</label><input id="f-location" value="${v('location')}" placeholder="Rack A · Row 3"></div>
-    </div>
-    <div class="f-split">
       <div class="f-row"><label>Bottles</label><input id="f-qty" inputmode="numeric" value="${w?w.qty:'1'}"></div>
+    </div>
+    <div class="f-split">
       <div class="f-row"><label>Price / btl (R)</label><input id="f-price" inputmode="decimal" value="${v('price')}"></div>
-    </div>
-    <div class="f-split">
       <div class="f-row"><label>Format</label><select id="f-format">${FORMATS.map(f=>`<option ${(p.format||'750ml')===f?'selected':''}>${f}</option>`).join('')}</select></div>
-      <div class="f-row"><label>Purchase date</label><input id="f-bought" type="date" value="${v('purchaseDate')}"></div>
     </div>
     <div class="f-split">
+      <div class="f-row"><label>Purchase date</label><input id="f-bought" type="date" value="${v('purchaseDate')}"></div>
       <div class="f-row"><label>Score / 100</label><input id="f-score" inputmode="numeric" value="${v('score')}" placeholder="e.g. 93"></div>
-      <div class="f-row"><label>&nbsp;</label><div style="padding-top:12px;color:var(--muted);font-size:12px">Critic or your own</div></div>
     </div>
     <div class="f-split">
       <div class="f-row"><label>Drink from (year)</label><input id="f-from" inputmode="numeric" value="${v('drinkFrom')}" placeholder="${YEAR}"></div>
@@ -997,9 +1002,9 @@ function saveWine(id){
   let score = parseInt(g('f-score'))||'';
   if(score!=='') score = Math.min(100, Math.max(0, score));
   const data = {
-    name, producer:g('f-producer'), vintage:g('f-vintage'),
+    name, producer:g('f-producer'), vintage:normVintage(g('f-vintage')),
     type:document.getElementById('f-type').value, varietal:g('f-varietal'),
-    region:g('f-region'), location:g('f-location'),
+    country:g('f-country'), region:g('f-region'), location:g('f-location'),
     qty:Math.max(0,parseInt(g('f-qty'))||0), price:parseFloat(g('f-price'))||'',
     score, drinkFrom:g('f-from'), drinkTo:g('f-to'), notes:g('f-notes'),
     format:document.getElementById('f-format').value, purchaseDate:g('f-bought'),
@@ -1037,19 +1042,19 @@ function openTastingForm(id, prefillWine, openedInfo){
     </div>
     <div class="f-split">
       <div class="f-row"><label>Producer</label><input id="t-producer" value="${v('producer')}" placeholder="Kanonkop"></div>
-      <div class="f-row"><label>Vintage</label><input id="t-vintage" inputmode="numeric" value="${v('vintage')}"></div>
+      <div class="f-row"><label>Vintage</label><input id="t-vintage" value="${v('vintage')}" placeholder="2019 or NV"></div>
     </div>
     <div class="f-split">
       <div class="f-row"><label>Type</label><select id="t-type">${TYPES.map(x=>`<option ${p.type===x?'selected':''}>${x}</option>`).join('')}</select></div>
       <div class="f-row"><label>Varietal / blend</label><input id="t-varietal" value="${v('varietal')}" placeholder="Bordeaux blend"></div>
     </div>
     <div class="f-split">
+      <div class="f-row"><label>Country</label><input id="t-country" value="${v('country')}" placeholder="South Africa"></div>
       <div class="f-row"><label>Region</label><input id="t-region" value="${v('region')}" placeholder="Stellenbosch"></div>
-      <div class="f-row"><label>Date</label><input id="t-date" type="date" value="${t?t.date:today}"></div>
     </div>
     <div class="f-split">
+      <div class="f-row"><label>Date</label><input id="t-date" type="date" value="${t?t.date:today}"></div>
       <div class="f-row"><label>Score / 100</label><input id="t-rating" inputmode="numeric" value="${t&&+t.rating>0?t.rating:''}" placeholder="e.g. 91"></div>
-      <div class="f-row"><label>&nbsp;</label><div style="padding-top:12px;color:var(--muted);font-size:12px">Your verdict</div></div>
     </div>
     <div class="f-row"><label>Notes</label><textarea id="t-notes" placeholder="Nose, palate, finish, who you shared it with…">${esc(t?.notes||'')}</textarea></div>
     <button class="primary-btn" onclick="saveTasting('${id||''}')">${t?'Save changes':'Add to journal'}</button>
@@ -1061,8 +1066,9 @@ function saveTasting(id){
   if(!name){ alert('Which wine did you taste?'); return; }
   let rating = parseInt(g('t-rating'))||0;
   rating = Math.min(100, Math.max(0, rating));
-  const data = { name, producer:g('t-producer'), vintage:g('t-vintage'),
-    type:document.getElementById('t-type').value, varietal:g('t-varietal'), region:g('t-region'),
+  const data = { name, producer:g('t-producer'), vintage:normVintage(g('t-vintage')),
+    type:document.getElementById('t-type').value, varietal:g('t-varietal'),
+    country:g('t-country'), region:g('t-region'),
     date:g('t-date'), rating, notes:g('t-notes'), photo: ui.photo||null };
   if(id){ Object.assign(state.tastings.find(x=>x.id===id), data); }
   else { state.tastings.push({ id:uid(), ...data }); }
@@ -1190,6 +1196,7 @@ async function exportPDF(){
       const bits = [];
       if(w.varietal) bits.push(w.varietal);
       if(w.region) bits.push(w.region);
+      if(w.country) bits.push(w.country);
       if(w.location) bits.push('Bin '+w.location);
       bits.push('\u00D7 '+(w.qty||0));
       if(+w.score>0) bits.push(w.score+' pts');
@@ -1243,7 +1250,7 @@ function buildImportPlan(rows){
   const H = {
     name:['name','wine','winename'], producer:['producer','winery','estate','brand'], vintage:['vintage','year'],
     type:['type','colour','color','category','style'], varietal:['varietal','blend','grape','grapes','cultivar','variety'],
-    region:['region','area','appellation','origin'], location:['bin','location','rack','position','slot'],
+    region:['region','area','appellation','origin'], country:['country','land','nation'], location:['bin','location','rack','position','slot'],
     qty:['qty','quantity','bottles','count','stock','units'], price:['price','priceperbottle','cost','unitprice','rbtl','pricebtl','pricer'],
     format:['format','size','bottlesize'], score:['score','rating','points','pts'],
     drinkFrom:['drinkfrom','from','windowfrom','start','drinkafter'], drinkTo:['drinkto','drinkby','to','windowto','end','until'],
@@ -1293,8 +1300,8 @@ function buildImportPlan(rows){
     const scn = parseInt(get(r, 'score'));
     const w = {
       name, producer:get(r,'producer'),
-      vintage:get(r,'vintage').replace(/[^\d]/g,'').slice(0,4),
-      type, varietal:get(r,'varietal'), region:get(r,'region'), location:get(r,'location'),
+      vintage: (v => /n\s*\.?\s*v/i.test(v) ? 'NV' : v.replace(/[^\d]/g,'').slice(0,4))(get(r,'vintage')),
+      type, varietal:get(r,'varietal'), country:get(r,'country'), region:get(r,'region'), location:get(r,'location'),
       qty, price: parseFloat(get(r,'price').replace(/[^\d.]/g,'')) || '',
       format: fmtMap(get(r,'format')),
       score: scn > 0 ? Math.min(100, scn) : '',
@@ -1344,7 +1351,7 @@ function applyCsvImport(){
   p.updates.forEach(u => {
     const ex = state.wines.find(x => x.id === u.id); if(!ex) return;
     ex.qty = (+ex.qty||0) + (+u.w.qty||0);
-    ['producer','varietal','region','location','price','format','score','drinkFrom','drinkTo','purchaseDate','notes']
+    ['producer','varietal','country','region','location','price','format','score','drinkFrom','drinkTo','purchaseDate','notes']
       .forEach(k => { if((ex[k] === '' || ex[k] == null) && u.w[k] !== '' && u.w[k] != null) ex[k] = u.w[k]; });
   });
   const msg = 'Added '+p.adds.length+' new wine'+(p.adds.length===1?'':'s')+', topped up '+p.updates.length+', skipped '+p.skipped+'.';
@@ -1355,9 +1362,9 @@ function applyCsvImport(){
 }
 const csvEsc = v => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
 function buildCSV(){
-  const head = ['Name','Producer','Vintage','Type','Varietal','Region','Bin','Qty','Price','Format','Score','Drink From','Drink To','Purchase Date','Notes'];
+  const head = ['Name','Producer','Vintage','Type','Varietal','Region','Country','Bin','Qty','Price','Format','Score','Drink From','Drink To','Purchase Date','Notes'];
   const lines = [head.join(',')];
-  state.wines.forEach(w => lines.push([w.name, w.producer, w.vintage, w.type, w.varietal, w.region, w.location,
+  state.wines.forEach(w => lines.push([w.name, w.producer, w.vintage, w.type, w.varietal, w.region, w.country||'', w.location,
     w.qty||0, w.price||'', w.format||'', w.score||'', w.drinkFrom||'', w.drinkTo||'', w.purchaseDate||'', w.notes||''
   ].map(csvEsc).join(',')));
   return '\uFEFF' + lines.join('\r\n');
@@ -1371,8 +1378,9 @@ function exportCSV(){
   a.click(); URL.revokeObjectURL(a.href);
 }
 function downloadCsvTemplate(){
-  const csv = '\uFEFFName,Producer,Vintage,Type,Varietal,Region,Bin,Qty,Price,Format,Score,Drink From,Drink To,Purchase Date,Notes\r\n' +
-    'Kanonkop Paul Sauer,Kanonkop,2019,Red,Bordeaux blend,Stellenbosch,Rack A,3,650,750ml,95,2025,2040,10/03/2024,Birthday wine\r\n';
+  const csv = '\uFEFFName,Producer,Vintage,Type,Varietal,Region,Country,Bin,Qty,Price,Format,Score,Drink From,Drink To,Purchase Date,Notes\r\n' +
+    'Kanonkop Paul Sauer,Kanonkop,2019,Red,Bordeaux blend,Stellenbosch,South Africa,Rack A,3,650,750ml,95,2025,2040,10/03/2024,Birthday wine\r\n' +
+    'Graham Beck Brut,Graham Beck,NV,Sparkling,MCC,Robertson,South Africa,S1,6,240,750ml,,2026,2029,,\r\n';
   const blob = new Blob([csv], { type:'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
