@@ -32,11 +32,15 @@ The camera button in the bottle and tasting forms attaches a label photo (take o
 
 **Settings → Import cellar from CSV** bulk-loads bottles from a spreadsheet — the fastest way to get a real cellar in. It matches columns by name (Name is required; Producer, Vintage — "NV" accepted — Type, Varietal, Region, Country, Bin, Qty, Price, Format, Score, Drink From, Drink To, Purchase Date, Notes all recognised under common spellings), understands SA conventions ("R 1 250" prices, dd/mm/yyyy dates, "MCC" as Sparkling), and shows a preview with counts before anything is written. Wines matching an existing name + vintage get their quantities topped up rather than duplicated. A template CSV is downloadable from the preview.
 
-**Export cellar as CSV** produces a spreadsheet of every bottle and field — ready for Excel or Power BI.
+**Export cellar as CSV** produces a spreadsheet of every bottle and field — ready for Excel or Power BI. **Export tastings as CSV** does the same for the journal: every entry with wine details, score, aromas, notes, and each structured-tasting dimension in its own column.
 
 ## PDF wine list
 
 **Settings → Export cellar as PDF** produces a restaurant-style wine list — sections in Sparkling → Rosé → White → Red → Dessert → Fortified order, sub-grouped by grape variety (alphabetical) with wines ranked cheapest to dearest within each variety (unpriced bottles first). Each wine shows vintage, name and price — plus the bottle size when it isn't a standard 750ml — with an italic detail line (producer where it isn't already in the name, region, country, bin, quantity, score, drink window), plus bottle and value totals. Needs internet the first time (it fetches the PDF library), then it's cached.
+
+## PDF tasting journal
+
+**Settings → Export tasting journal as PDF** produces a printable chronological journal — each tasting with its wine, date, score, structured-tasting summary, aroma picks and full notes, in the same styling as the wine list.
 
 ## Backups and Google Drive
 

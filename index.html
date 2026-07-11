@@ -1258,7 +1258,9 @@ function openSettings(){
     <h2>Settings</h2>
     <p style="font-size:12.5px;font-weight:600;margin:-6px 0 12px;color:${b.warn?'var(--ochre)':'var(--muted)'}">${b.msg}${b.warn?' Time for a fresh one.':''}</p>
     <button class="settings-btn" onclick="exportPDF()">Export cellar as PDF<small>A printable inventory: every wine with vintage, region, bin, quantity, score, drink window and value.</small></button>
+    <button class="settings-btn" onclick="exportTastingsPDF()">Export tasting journal as PDF<small>A printable chronological journal — every tasting with its score, structured summary, aromas and notes.</small></button>
     <button class="settings-btn" onclick="exportCSV()">Export cellar as CSV<small>Spreadsheet-ready — every bottle and field, for Excel or Power BI.</small></button>
+    <button class="settings-btn" onclick="exportTastingsCSV()">Export tastings as CSV<small>Every journal entry with wine details, score, aromas, notes, and each structured-tasting dimension as its own column.</small></button>
     <button class="settings-btn" onclick="document.getElementById('csv-file').click()">Import cellar from CSV<small>Bulk-load bottles from a spreadsheet. Shows a preview before anything is added; existing wines (same name + vintage) get their quantities topped up.</small></button>
     <input type="file" id="csv-file" accept=".csv,text/csv" style="display:none" onchange="csvPicked(this)">
     <button class="settings-btn" onclick="shareBackup()">Share backup<small>Sends the backup to Google Drive, email or WhatsApp via the share sheet (as a .txt file — restore accepts it as-is).</small></button>
@@ -1587,6 +1589,107 @@ function downloadCsvTemplate(){
   a.href = URL.createObjectURL(blob);
   a.download = 'cellarbook-template.csv';
   a.click(); URL.revokeObjectURL(a.href);
+}
+/* ---- tasting journal exports ---- */
+function satPlain(t){
+  const s = t.sat; if(!s) return '';
+  const parts = [];
+  if(s.appIntensity || s.colour) parts.push([s.appIntensity, s.colour].filter(Boolean).join(' '));
+  if(s.noseIntensity) parts.push('Nose '+s.noseIntensity);
+  if(s.development) parts.push(s.development);
+  const L = { sweetness:'', acidity:'Acidity ', tannin:'Tannin ', alcohol:'Alcohol ', body:'Body ',
+              mousse:'Mousse ', flavourIntensity:'Flavour ', finish:'Finish ' };
+  Object.keys(L).forEach(k => { if(s[k]) parts.push(L[k]+s[k]); });
+  if(s.quality) parts.push('Quality: '+s.quality);
+  if(s.readiness) parts.push(s.readiness);
+  return parts.join(' \u00B7 ');
+}
+const SAT_COLS = [['appIntensity','Appearance intensity'],['colour','Colour'],['noseIntensity','Nose intensity'],
+  ['development','Development'],['sweetness','Sweetness'],['acidity','Acidity'],['tannin','Tannin'],
+  ['alcohol','Alcohol'],['body','Body'],['mousse','Mousse'],['flavourIntensity','Flavour intensity'],
+  ['finish','Finish'],['quality','Quality'],['readiness','Readiness']];
+function buildTastingsCSV(){
+  const head = ['Date','Wine','Producer','Vintage','Type','Varietal','Region','Country','Score','Aromas','Notes',
+                ...SAT_COLS.map(c=>c[1])];
+  const lines = [head.join(',')];
+  state.tastings.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(t => {
+    const s = t.sat || {};
+    lines.push([t.date||'', t.name, t.producer||'', t.vintage||'', t.type||'', t.varietal||'',
+      t.region||'', t.country||'', (+t.rating>0? t.rating:''), (t.aromas||[]).join('; '), t.notes||'',
+      ...SAT_COLS.map(c => s[c[0]]||'')].map(csvEsc).join(','));
+  });
+  return '\uFEFF'+lines.join('\r\n');
+}
+function exportTastingsCSV(){
+  if(!state.tastings.length){ alert('The journal is empty — nothing to export yet.'); return; }
+  const blob = new Blob([buildTastingsCSV()], { type:'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cellarbook-tastings-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+}
+async function exportTastingsPDF(){
+  if(!state.tastings.length){ alert('The journal is empty — nothing to export yet.'); return; }
+  try{
+    if(!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  }catch(e){ alert('Could not load the PDF library — an internet connection is needed the first time.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 60;
+  const WINE=[110,30,43], INK=[43,38,35], MUT=[130,122,112], LINE=[216,208,190];
+  const today = new Date().toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'});
+  let y = 68;
+  doc.setFont('times','bold'); doc.setFontSize(26); doc.setTextColor(...WINE);
+  doc.text('Cellar Book', W/2, y, {align:'center'}); y += 17;
+  doc.setFont('times','italic'); doc.setFontSize(11); doc.setTextColor(...MUT);
+  doc.text('Tasting journal \u00B7 '+today, W/2, y, {align:'center'}); y += 12;
+  doc.setDrawColor(...WINE); doc.setLineWidth(1); doc.line(M, y, W-M, y); y += 30;
+  const ensure = hN => { if(y + hN > H - 64){ doc.addPage(); y = 60; } };
+  const fit = (s, maxW) => {
+    if(doc.getTextWidth(s) <= maxW) return s;
+    while(s.length > 3 && doc.getTextWidth(s+'\u2026') > maxW) s = s.slice(0,-1);
+    return s+'\u2026';
+  };
+  const list = state.tastings.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  for(const t of list){
+    ensure(58);
+    doc.setFont('times','bold'); doc.setFontSize(12.5); doc.setTextColor(...INK);
+    doc.text(fit((t.name||'')+(t.vintage? '  '+t.vintage:''), W-2*M-64), M, y);
+    if(+t.rating > 0){
+      doc.setFont('times','bold'); doc.setTextColor(...WINE);
+      doc.text(t.rating+' pts', W-M, y, {align:'right'});
+    }
+    y += 14;
+    const meta = [fmtDate(t.date), t.producer, t.varietal, t.region, t.country].filter(Boolean).join('  \u00B7  ');
+    if(meta){
+      doc.setFont('times','italic'); doc.setFontSize(9); doc.setTextColor(...MUT);
+      doc.text(fit(meta, W-2*M), M, y); y += 13;
+    }
+    const sp = satPlain(t);
+    if(sp){
+      doc.setFont('times','italic'); doc.setFontSize(9); doc.setTextColor(96,86,76);
+      for(const line of doc.splitTextToSize(sp, W-2*M)){ ensure(13); doc.text(line, M, y); y += 11.5; }
+      y += 1;
+    }
+    if(t.aromas && t.aromas.length){
+      doc.setFont('times','italic'); doc.setFontSize(9); doc.setTextColor(...MUT);
+      for(const line of doc.splitTextToSize('Aromas: '+t.aromas.join(', '), W-2*M)){ ensure(13); doc.text(line, M, y); y += 11.5; }
+      y += 1;
+    }
+    if(t.notes){
+      doc.setFont('times','normal'); doc.setFontSize(10); doc.setTextColor(...INK);
+      for(const line of doc.splitTextToSize(t.notes, W-2*M)){ ensure(14); doc.text(line, M, y); y += 12.5; }
+    }
+    y += 6; ensure(12);
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.6);
+    doc.line(M, y, W-M, y); y += 18;
+  }
+  ensure(24);
+  doc.setFont('times','normal'); doc.setFontSize(10); doc.setTextColor(...MUT);
+  doc.text(list.length+' tasting'+(list.length===1?'':'s')+' recorded', W/2, y, {align:'center'});
+  doc.setFontSize(8);
+  doc.text('Generated by Cellar Book', W/2, H-30, {align:'center'});
+  doc.save('cellarbook-journal-'+new Date().toISOString().slice(0,10)+'.pdf');
 }
 function importData(input){
   const file = input.files[0]; if(!file) return;
