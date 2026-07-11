@@ -35,7 +35,7 @@ The camera button in the bottle and tasting forms attaches a label photo (take o
 
 ## PDF wine list
 
-**Settings → Export cellar as PDF** produces a restaurant-style wine list — sections in Sparkling → Rosé → White → Red → Dessert → Fortified order, each wine as vintage, name and price with an italic detail line (varietal, region, bin, quantity, score, drink window), plus bottle and value totals. Needs internet the first time (it fetches the PDF library), then it's cached.
+**Settings → Export cellar as PDF** produces a restaurant-style wine list — sections in Sparkling → Rosé → White → Red → Dessert → Fortified order, sub-grouped by grape variety (alphabetical) with wines ranked cheapest to dearest within each variety (unpriced bottles last). Each wine shows vintage, name and price with an italic detail line (region, country, bin, quantity, score, drink window), plus bottle and value totals. Needs internet the first time (it fetches the PDF library), then it's cached.
 
 ## Backups and Google Drive
 

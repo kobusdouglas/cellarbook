@@ -1170,8 +1170,15 @@ async function exportPDF(){
   pageHead();
   const ORDER = ['Sparkling','Ros\u00E9','White','Red','Dessert','Fortified'];
   const groups = ORDER
-    .map(t => [t, state.wines.filter(w=>w.type===t).sort((a,b)=>(a.name||'').localeCompare(b.name||''))])
+    .map(t => [t, state.wines.filter(w=>w.type===t)])
     .filter(([,list]) => list.length);
+  const priceAsc = (a,b) => {
+    const pa = +a.price||0, pb = +b.price||0;
+    if(pa && pb) return (pa-pb) || (a.name||'').localeCompare(b.name||'');
+    if(pa) return -1;                                  // unpriced wines rank last
+    if(pb) return 1;
+    return (a.name||'').localeCompare(b.name||'');
+  };
 
   for(const [type, list] of groups){
     ensure(56);
@@ -1182,7 +1189,26 @@ async function exportPDF(){
     doc.line(W/2-60, y, W/2+60, y);
     y += 22;
 
-    for(const w of list){
+    // sub-group by grape variety, alphabetical, unspecified last
+    const byVar = new Map();
+    list.forEach(w => {
+      const key = (w.varietal||'').trim().toLowerCase() || '~';
+      if(!byVar.has(key)) byVar.set(key, { label: (w.varietal||'').trim() || 'Unspecified', wines: [] });
+      byVar.get(key).wines.push(w);
+    });
+    const subs = [...byVar.entries()].sort((a,b) =>
+      a[0]==='~' ? 1 : b[0]==='~' ? -1 : a[0].localeCompare(b[0]));
+    const showSub = !(subs.length === 1 && subs[0][0] === '~');
+
+    for(const [, sub] of subs){
+      sub.wines.sort(priceAsc);                        // least → most expensive
+      if(showSub){
+        ensure(58);
+        doc.setFont('times','bolditalic'); doc.setFontSize(10.5); doc.setTextColor(...INK);
+        doc.text(sub.label, M, y);
+        y += 16;
+      }
+      for(const w of sub.wines){
       ensure(36);
       const price = +w.price>0 ? randPdf(w.price) : '';
       doc.setFont('times','bold'); doc.setFontSize(11.5); doc.setTextColor(...INK);
@@ -1194,7 +1220,6 @@ async function exportPDF(){
       }
       y += 13;
       const bits = [];
-      if(w.varietal) bits.push(w.varietal);
       if(w.region) bits.push(w.region);
       if(w.country) bits.push(w.country);
       if(w.location) bits.push('Bin '+w.location);
@@ -1204,8 +1229,10 @@ async function exportPDF(){
       doc.setFont('times','italic'); doc.setFontSize(9); doc.setTextColor(...MUT);
       doc.text(fit(bits.join('  \u00B7  '), W-2*M), M, y);
       y += 19;
+      }
+      y += 4;
     }
-    y += 10;
+    y += 8;
   }
 
   ensure(40);
