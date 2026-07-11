@@ -245,6 +245,29 @@ nav.tabs{
 }
 .settings-btn small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px;font-weight:400}
 
+/* structured tasting */
+details.sat{margin:2px 0 12px;border:1px solid var(--line-strong);border-radius:11px;background:var(--card);overflow:hidden}
+details.sat summary{list-style:none;cursor:pointer;padding:12px 14px;font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--wine);display:flex;justify-content:space-between;align-items:center}
+details.sat summary::-webkit-details-marker{display:none}
+details.sat summary:after{content:'+';font-size:16px;color:var(--muted);font-weight:400}
+details.sat[open] summary:after{content:'−'}
+.sat-body{padding:0 12px 12px;border-top:1px solid var(--line)}
+.sat-h{font-family:var(--display);font-size:14.5px;font-weight:700;color:var(--wine-deep);margin:14px 0 0}
+.sat-row{margin:10px 0 2px}
+.sat-label{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px}
+.sat-opts{display:flex;flex-wrap:wrap;gap:6px}
+.sat-pill{font-size:12px;font-weight:600;padding:6px 11px;border-radius:999px;border:1px solid var(--line-strong);background:var(--paper);color:var(--ink)}
+.sat-pill.on{background:var(--wine);border-color:var(--wine);color:#FBF6EF}
+.sat-summary{margin-top:8px;font-size:12px;color:#5C544B;border-top:1px dashed var(--line);padding-top:8px;line-height:1.7}
+.sat-summary b{color:var(--wine);letter-spacing:.04em}
+details.tier{border:1px solid var(--line);border-radius:9px;margin:10px 0;background:var(--paper)}
+details.tier summary{list-style:none;cursor:pointer;padding:10px 12px;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);display:flex;justify-content:space-between;align-items:center;gap:8px}
+details.tier summary::-webkit-details-marker{display:none}
+details.tier summary:after{content:'+';font-size:14px;color:var(--muted);font-weight:400}
+details.tier[open] summary:after{content:'−'}
+.tier-cap{font-weight:400;letter-spacing:.02em;text-transform:none;font-style:italic;color:var(--muted);font-size:11px;flex:1;text-align:right}
+.tier-body{padding:0 10px 10px}
+
 /* photo box + scan */
 .photo-box{
   border:1.5px dashed var(--line-strong);border-radius:12px;background:var(--card);
@@ -604,7 +627,7 @@ function viewTastings(){
   const q = (ui.tSearch||'').toLowerCase();
   let list = state.tastings.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   if(ui.tFilterWine) list = list.filter(t=>sameWine(t, ui.tFilterWine));
-  if(q) list = list.filter(t=>[t.name,t.producer,t.vintage,t.varietal,t.region,t.country,t.notes].join(' ').toLowerCase().includes(q));
+  if(q) list = list.filter(t=>[t.name,t.producer,t.vintage,t.varietal,t.region,t.country,t.notes,(t.aromas||[]).join(' ')].join(' ').toLowerCase().includes(q));
   const fw = ui.tFilterWine;
   let html = `
     <div class="search-row"><input id="tastings-search" placeholder="Search tastings…" value="${esc(ui.tSearch)}"
@@ -625,6 +648,8 @@ function viewTastings(){
         ${+t.rating>0?`<div class="score-badge ochre"><b>${t.rating}</b><span>pts</span></div>`:''}
       </div>
       ${t.notes?`<div class="tasting-notes">${esc(t.notes)}</div>`:''}
+      ${satSummary(t)}
+      ${t.aromas && t.aromas.length ? `<div class="sat-summary"><b>Aromas</b> · ${t.aromas.map(esc).join(' · ')}</div>` : ''}
       <div class="card-actions">
         <button class="chip-btn" onclick="openTastingForm('${t.id}')">Edit</button>
         <button class="chip-btn" onclick="deleteTasting('${t.id}')">Delete</button>
@@ -1023,6 +1048,119 @@ function deleteWine(id){
   save(); closeSheet(); render();
 }
 
+/* ================= structured tasting (WSET-style dimensions) ================= */
+const SAT_COLOURS = {
+  White:['lemon-green','lemon','gold','amber','brown'],
+  Sparkling:['lemon-green','lemon','gold','amber'],
+  'Rosé':['pink','salmon','orange'],
+  Red:['purple','ruby','garnet','tawny','brown'],
+  Dessert:['lemon','gold','amber','brown'],
+  Fortified:['gold','amber','tawny','brown']
+};
+const SAT_SCALE5 = ['light','M-','M','M+','pronounced'];
+function satRow(key, label, opts){
+  return `<div class="sat-row"><div class="sat-label">${label}</div><div class="sat-opts">`+
+    opts.map(o=>`<button type="button" class="sat-pill ${ui.sat[key]===o?'on':''}" onclick="satPick('${key}','${o}',this)">${o}</button>`).join('')+
+    `</div></div>`;
+}
+function satPick(key, val, btn){
+  if(ui.sat[key] === val){ delete ui.sat[key]; btn.classList.remove('on'); return; }
+  ui.sat[key] = val;
+  btn.parentElement.querySelectorAll('.sat-pill').forEach(b=>b.classList.toggle('on', b===btn));
+}
+function satBodyHTML(){
+  const type = document.getElementById('t-type') ? document.getElementById('t-type').value : 'Red';
+  return `
+    <div class="sat-h">Appearance</div>
+    ${satRow('appIntensity','Intensity',['pale','medium','deep'])}
+    ${satRow('colour','Colour', SAT_COLOURS[type] || SAT_COLOURS.Red)}
+    <div class="sat-h">Nose</div>
+    ${satRow('noseIntensity','Intensity', SAT_SCALE5)}
+    ${satRow('development','Development',['youthful','developing','fully developed','tired'])}
+    <div class="sat-h">Palate</div>
+    ${satRow('sweetness','Sweetness',['dry','off-dry','M-dry','M-sweet','sweet','luscious'])}
+    ${satRow('acidity','Acidity',['low','M-','M','M+','high'])}
+    ${satRow('tannin','Tannin',['low','M-','M','M+','high'])}
+    ${satRow('alcohol','Alcohol',['low','medium','high'])}
+    ${satRow('body','Body',['light','M-','M','M+','full'])}
+    ${type==='Sparkling' ? satRow('mousse','Mousse',['delicate','creamy','aggressive']) : ''}
+    ${satRow('flavourIntensity','Flavour intensity', SAT_SCALE5)}
+    ${satRow('finish','Finish',['short','M-','M','M+','long'])}
+    <div class="sat-h">Conclusions</div>
+    ${satRow('quality','Quality',['poor','acceptable','good','very good','outstanding'])}
+    ${satRow('readiness','Readiness',['too young','drink now: can age','at peak','past its best'])}`;
+}
+function refreshSat(){
+  const type = document.getElementById('t-type').value;
+  const colours = SAT_COLOURS[type] || [];
+  if(ui.sat.colour && !colours.includes(ui.sat.colour)) delete ui.sat.colour;
+  if(type !== 'Sparkling') delete ui.sat.mousse;
+  const el = document.getElementById('sat-body');
+  if(el) el.innerHTML = satBodyHTML();
+}
+function satSummary(t){
+  const s = t.sat; if(!s) return '';
+  const parts = [];
+  if(s.appIntensity || s.colour) parts.push([s.appIntensity, s.colour].filter(Boolean).join(' '));
+  if(s.noseIntensity) parts.push('Nose '+s.noseIntensity);
+  if(s.development) parts.push(s.development);
+  const L = { sweetness:'', acidity:'Acidity ', tannin:'Tannin ', alcohol:'Alcohol ', body:'Body ',
+              mousse:'Mousse ', flavourIntensity:'Flavour ', finish:'Finish ' };
+  Object.keys(L).forEach(k => { if(s[k]) parts.push(L[k]+s[k]); });
+  if(!parts.length && !s.quality && !s.readiness) return '';
+  const tail = [];
+  if(s.quality) tail.push('<b>'+esc(s.quality)+'</b>');
+  if(s.readiness) tail.push(esc(s.readiness));
+  return `<div class="sat-summary">${parts.map(esc).concat(tail).join(' · ')}</div>`;
+}
+
+/* ---- aroma & flavour lexicon picker ---- */
+const AROMAS = [
+  ['Primary', 'grape & alcoholic fermentation', [
+    ['Floral', 'acacia, honeysuckle, chamomile, elderflower, geranium, blossom, rose, violet'],
+    ['Green fruit', 'apple, gooseberry, pear, pear drop, quince, grape'],
+    ['Citrus fruit', 'grapefruit, lemon, lime (juice or zest), orange peel, lemon peel'],
+    ['Stone fruit', 'peach, apricot, nectarine'],
+    ['Tropical fruit', 'banana, lychee, mango, melon, passion fruit, pineapple'],
+    ['Red fruit', 'redcurrant, cranberry, raspberry, strawberry, red cherry, red plum'],
+    ['Black fruit', 'blackcurrant, blackberry, bramble, blueberry, black cherry, black plum'],
+    ['Dried/cooked fruit', 'fig, prune, raisin, sultana, kirsch, jamminess, baked/stewed fruits, preserved fruits'],
+    ['Herbaceous', 'green bell pepper (capsicum), grass, tomato leaf, asparagus, blackcurrant leaf'],
+    ['Herbal', 'eucalyptus, mint, medicinal, lavender, fennel, dill'],
+    ['Pungent spice', 'black/white pepper, liquorice'],
+    ['Other', 'flint, wet stones, wet wool']
+  ]],
+  ['Secondary', 'post-fermentation winemaking', [
+    ['Yeast (lees, autolysis)', 'biscuit, bread, toast, pastry, brioche, bread dough, cheese'],
+    ['Malolactic conversion', 'butter, cheese, cream'],
+    ['Oak', 'vanilla, cloves, nutmeg, coconut, butterscotch, toast, cedar, charred wood, smoke, chocolate, coffee, resinous']
+  ]],
+  ['Tertiary', 'maturation', [
+    ['Deliberate oxidation', 'almond, marzipan, hazelnut, walnut, chocolate, coffee, toffee, caramel'],
+    ['Fruit development (white)', 'dried apricot, marmalade, dried apple, dried banana'],
+    ['Fruit development (red)', 'fig, prune, tar, dried blackberry, dried cranberry, cooked blackberry, cooked red plum'],
+    ['Bottle age (white)', 'petrol, kerosene, cinnamon, ginger, nutmeg, toast, nutty, mushroom, hay, honey'],
+    ['Bottle age (red)', 'leather, forest floor, earth, mushroom, game, tobacco, vegetal, wet leaves, savoury, meaty, farmyard']
+  ]]
+];
+function aromaPick(v, btn){
+  const i = ui.aromas.indexOf(v);
+  if(i >= 0){ ui.aromas.splice(i, 1); btn.classList.remove('on'); }
+  else { ui.aromas.push(v); btn.classList.add('on'); }
+}
+function aromaBodyHTML(){
+  return AROMAS.map(([tier, cap, rows]) => {
+    const tierOpen = rows.some(([,d]) => d.split(', ').some(x => ui.aromas.includes(x)));
+    return `<details class="tier" ${tierOpen?'open':''}>
+      <summary>${tier}<span class="tier-cap">${cap}</span></summary>
+      <div class="tier-body">${rows.map(([cluster, d]) => `
+        <div class="sat-row"><div class="sat-label">${cluster}</div><div class="sat-opts">${
+          d.split(', ').map(x => `<button type="button" class="sat-pill ${ui.aromas.includes(x)?'on':''}" onclick="aromaPick('${x}',this)">${x}</button>`).join('')
+        }</div></div>`).join('')}</div>
+    </details>`;
+  }).join('');
+}
+
 /* ================= tasting form ================= */
 function openTastingForm(id, prefillWine, openedInfo){
   const t = id? state.tastings.find(x=>x.id===id) : null;
@@ -1030,6 +1168,8 @@ function openTastingForm(id, prefillWine, openedInfo){
   const v = k => esc(p[k]??'');
   ui.photo = t?.photo || (prefillWine?.photo || null);
   ui.photoOCR = null;
+  ui.sat = { ...(t?.sat || {}) };
+  ui.aromas = [ ...(t?.aromas || []) ];
   const today = new Date().toISOString().slice(0,10);
   const names = [...new Set(state.wines.map(w=>w.name))];
   const head = openedInfo ? openedHeadHTML(openedInfo) : `<h2>${t?'Edit tasting':'Tasting note'}</h2>`;
@@ -1045,7 +1185,7 @@ function openTastingForm(id, prefillWine, openedInfo){
       <div class="f-row"><label>Vintage</label><input id="t-vintage" value="${v('vintage')}" placeholder="2019 or NV"></div>
     </div>
     <div class="f-split">
-      <div class="f-row"><label>Type</label><select id="t-type">${TYPES.map(x=>`<option ${p.type===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="f-row"><label>Type</label><select id="t-type" onchange="refreshSat()">${TYPES.map(x=>`<option ${p.type===x?'selected':''}>${x}</option>`).join('')}</select></div>
       <div class="f-row"><label>Varietal / blend</label><input id="t-varietal" value="${v('varietal')}" placeholder="Bordeaux blend"></div>
     </div>
     <div class="f-split">
@@ -1057,6 +1197,14 @@ function openTastingForm(id, prefillWine, openedInfo){
       <div class="f-row"><label>Score / 100</label><input id="t-rating" inputmode="numeric" value="${t&&+t.rating>0?t.rating:''}" placeholder="e.g. 91"></div>
     </div>
     <div class="f-row"><label>Notes</label><textarea id="t-notes" placeholder="Nose, palate, finish, who you shared it with…">${esc(t?.notes||'')}</textarea></div>
+    <details class="sat" ${t && t.sat && Object.keys(t.sat).length ? 'open' : ''}>
+      <summary>Structured tasting</summary>
+      <div class="sat-body" id="sat-body">${satBodyHTML()}</div>
+    </details>
+    <details class="sat" ${t && t.aromas && t.aromas.length ? 'open' : ''}>
+      <summary>Aromas &amp; flavours</summary>
+      <div class="sat-body">${aromaBodyHTML()}</div>
+    </details>
     <button class="primary-btn" onclick="saveTasting('${id||''}')">${t?'Save changes':'Add to journal'}</button>
   `);
 }
@@ -1069,7 +1217,9 @@ function saveTasting(id){
   const data = { name, producer:g('t-producer'), vintage:normVintage(g('t-vintage')),
     type:document.getElementById('t-type').value, varietal:g('t-varietal'),
     country:g('t-country'), region:g('t-region'),
-    date:g('t-date'), rating, notes:g('t-notes'), photo: ui.photo||null };
+    date:g('t-date'), rating, notes:g('t-notes'), photo: ui.photo||null,
+    sat: Object.keys(ui.sat||{}).length ? { ...ui.sat } : null,
+    aromas: (ui.aromas||[]).length ? [ ...ui.aromas ] : null };
   if(id){ Object.assign(state.tastings.find(x=>x.id===id), data); }
   else { state.tastings.push({ id:uid(), ...data }); }
   save(); closeSheet(); ui.tab='tastings'; render();
