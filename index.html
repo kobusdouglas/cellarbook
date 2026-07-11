@@ -1175,8 +1175,8 @@ async function exportPDF(){
   const priceAsc = (a,b) => {
     const pa = +a.price||0, pb = +b.price||0;
     if(pa && pb) return (pa-pb) || (a.name||'').localeCompare(b.name||'');
-    if(pa) return -1;                                  // unpriced wines rank last
-    if(pb) return 1;
+    if(pa) return 1;                                   // unpriced wines lead their group
+    if(pb) return -1;
     return (a.name||'').localeCompare(b.name||'');
   };
 
@@ -1212,7 +1212,9 @@ async function exportPDF(){
       ensure(36);
       const price = +w.price>0 ? randPdf(w.price) : '';
       doc.setFont('times','bold'); doc.setFontSize(11.5); doc.setTextColor(...INK);
-      const nm = fit((w.vintage? w.vintage+'   ':'')+(w.name||''), W-2*M-90);
+      let nmRaw = (w.vintage? w.vintage+'   ':'')+(w.name||'');
+      if(w.format && w.format !== '750ml') nmRaw += '  \u2014  '+w.format;
+      const nm = fit(nmRaw, W-2*M-90);
       doc.text(nm, M, y);
       if(price){
         doc.setFont('times','normal');
@@ -1220,6 +1222,8 @@ async function exportPDF(){
       }
       y += 13;
       const bits = [];
+      const prod = String(w.producer||'').trim();
+      if(prod && !(w.name||'').toLowerCase().includes(prod.toLowerCase())) bits.push(prod);
       if(w.region) bits.push(w.region);
       if(w.country) bits.push(w.country);
       if(w.location) bits.push('Bin '+w.location);
