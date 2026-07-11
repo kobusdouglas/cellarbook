@@ -1398,7 +1398,7 @@ async function exportPDF(){
       if(prod && !(w.name||'').toLowerCase().includes(prod.toLowerCase())) bits.push(prod);
       if(w.region) bits.push(w.region);
       if(w.country) bits.push(w.country);
-      if(w.location) bits.push('Bin '+w.location);
+      if(w.location) bits.push(w.location);
       bits.push('\u00D7 '+(w.qty||0));
       if(+w.score>0) bits.push(w.score+' pts');
       if(w.drinkFrom||w.drinkTo) bits.push('drink '+[w.drinkFrom,w.drinkTo].filter(Boolean).join('\u2013'));
