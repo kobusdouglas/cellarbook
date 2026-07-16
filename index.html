@@ -146,11 +146,28 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 16px 1
   border:1px solid var(--line-strong);color:var(--muted);background:var(--card);
 }
 .filter.active{border-color:var(--wine);color:#FBF6EF;background:var(--wine)}
-.sort-select{background:var(--card);border:1px solid var(--line-strong);border-radius:12px;padding:0 10px;color:var(--ink);font-size:13px;outline:none;max-width:132px}
+.filter.att{border-color:var(--ochre);color:var(--ochre)}
+.filter.att.active{background:var(--ochre);border-color:var(--ochre);color:#FBF6EF}
+.sort-btn{display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--line-strong);border-radius:12px;padding:0 12px;color:var(--ink);font-size:12.5px;font-weight:600;white-space:nowrap;max-width:150px;overflow:hidden}
+.sort-btn .g{color:var(--wine);font-size:14px}
+.sort-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.sort-row.on{border-color:var(--wine);color:var(--wine)}
+.sort-dir{font-size:15px;font-weight:700}
 
 /* ---------- tastings ---------- */
 .tasting-card{border-left:3px solid var(--ochre)}
 .score-badge.ochre{background:var(--ochre)}
+.stars{font-size:16px}
+.stars-row{display:inline-flex;gap:2px;white-space:nowrap;line-height:1.2}
+.star-wrap{position:relative;display:inline-block;width:1.08em;height:1.2em}
+.star-base{position:absolute;left:0;top:0;width:1.08em;text-align:center;line-height:1.2;color:var(--line-strong)}
+.star-fill{position:absolute;left:0;top:0;height:100%;overflow:hidden;color:var(--ochre)}
+.star-inner{display:block;width:1.08em;text-align:center;line-height:1.2}
+.star-pick{display:flex;align-items:center;gap:5px;font-size:34px}
+.star-pick .half{position:absolute;top:0;height:100%;width:50%;z-index:2;padding:0;background:none}
+.star-pick .hl{left:0}
+.star-pick .hr{left:50%}
+.star-clear{font-size:12px;margin-left:12px}
 .tasting-notes{margin-top:8px;font-size:13.5px;color:#5C544B;white-space:pre-wrap}
 .tasting-date{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-top:2px}
 
@@ -294,8 +311,8 @@ details.tier[open] summary:after{content:'−'}
 .photo-preview{display:flex;gap:12px;align-items:center}
 .photo-preview img{width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid var(--line-strong)}
 .photo-preview .col{flex:1;text-align:left}
-.scan-status{font-size:12px;color:var(--vine);margin-top:6px;font-weight:600;min-height:16px}
-.scan-status.err{color:var(--wine)}
+.status-line{font-size:12px;color:var(--vine);margin-top:6px;font-weight:600;min-height:16px}
+.status-line.err{color:var(--wine)}
 .mini-btn{
   font-size:12px;font-weight:700;color:var(--wine);border:1px solid var(--wine);
   border-radius:999px;padding:6px 12px;background:var(--wine-tint);
@@ -328,9 +345,9 @@ details.tier[open] summary:after{content:'−'}
   <div class="fs hidden" id="fastscroll" aria-hidden="true"><div class="fs-thumb" id="fsthumb"></div></div>
 
   <nav class="tabs">
-    <button class="tab" data-tab="cellar" onclick="setTab('cellar')"><span class="glyph">◈</span>Cellar</button>
+    <button class="tab" data-tab="cellar" onclick="setTab('cellar')"><span class="glyph">◈</span>Cellar<span class="badge" id="alertBadge" style="display:none"></span></button>
     <button class="tab" data-tab="tastings" onclick="setTab('tastings')"><span class="glyph">✎</span>Tastings</button>
-    <button class="tab" data-tab="alerts" onclick="setTab('alerts')"><span class="glyph">⌛</span>Alerts<span class="badge" id="alertBadge" style="display:none"></span></button>
+    <button class="tab" data-tab="farms" onclick="setTab('farms')"><span class="glyph">⌂</span>Farms</button>
     <button class="tab" data-tab="stats" onclick="setTab('stats')"><span class="glyph">№</span>Stats</button>
   </nav>
 </div>
@@ -343,7 +360,7 @@ details.tier[open] summary:after{content:'−'}
 /* ================= storage (IndexedDB, migrates from old localStorage) ================= */
 const LS_KEY='cellarbook-v1';
 let state = { wines:[], tastings:[] };
-let ui = { tab:'cellar', search:'', filter:'All', tSearch:'', tFilterWine:null, photo:null, sort:'recent' };
+let ui = { tab:'cellar', search:'', filter:'All', tSearch:'', tFilterWine:null, photo:null, photoId:null, photoDirty:false, photoMode:'label', geo:null, farmStars:0, sort:'recent', sortRev:false };
 
 function idbOpen(){
   return new Promise((res,rej)=>{
@@ -367,11 +384,136 @@ async function idbSet(k,v){
     t.onsuccess = () => res(); t.onerror = () => rej(t.error);
   });
 }
+async function idbDel(k){
+  const db = await idbOpen();
+  return new Promise((res,rej)=>{
+    const t = db.transaction('kv','readwrite').objectStore('kv').delete(k);
+    t.onsuccess = () => res(); t.onerror = () => rej(t.error);
+  });
+}
+async function idbKeys(){
+  const db = await idbOpen();
+  return new Promise((res,rej)=>{
+    const t = db.transaction('kv').objectStore('kv').getAllKeys();
+    t.onsuccess = () => res(t.result || []); t.onerror = () => rej(t.error);
+  });
+}
+
+/* ---- photo store: one record per photo, so saving the cellar never rewrites them ----
+   state holds only a photoId; the image bytes live under 'photo:<id>' and are read
+   on demand into photoCache, which keeps rendering synchronous.                      */
+const photoCache = new Map();
+const PHOTO_COLLS = ['wines','tastings','farms'];
+let photoWriteWarned = false;
+// returns null if the image could not be stored — the caller keeps the record regardless,
+// because losing a bottle to a full disk is far worse than losing its photo
+async function putPhoto(dataUrl){
+  const id = 'p'+uid();
+  try{
+    await idbSet('photo:'+id, dataUrl);
+  }catch(e){
+    if(!photoWriteWarned){
+      photoWriteWarned = true;
+      alert("That photo couldn't be saved — your device is probably out of storage. Everything else was saved. Freeing some space, or removing a few old photos, will fix it.");
+    }
+    return null;
+  }
+  photoCache.set(id, dataUrl);
+  return id;
+}
+async function getPhoto(id){
+  if(!id) return null;
+  if(photoCache.has(id)) return photoCache.get(id);
+  try{
+    const d = await idbGet('photo:'+id);
+    if(d) photoCache.set(id, d);
+    return d || null;
+  }catch(e){ return null; }
+}
+async function delPhoto(id){
+  if(!id) return;
+  photoCache.delete(id);
+  try{ await idbDel('photo:'+id); }catch(e){}
+}
+// resolve the photo for a form: dataURL for the box, id to compare against on save
+async function loadFormPhoto(rec, own){
+  // own=false means we're prefilling from someone else's record (a bottle -> a tasting):
+  // take the image but not the id, so saving writes our own copy and their photo is never
+  // deleted out from under them.
+  ui.photo = rec?.photoId ? await getPhoto(rec.photoId) : null;
+  ui.photoId = own ? (rec?.photoId || null) : null;
+  ui.photoDirty = !own && !!ui.photo;
+}
+// returns the photoId to store, writing/removing records only when the photo changed
+async function commitFormPhoto(){
+  if(!ui.photoDirty) return ui.photoId || null;
+  const old = ui.photoId;
+  if(!ui.photo){                                   // photo removed
+    if(old) await delPhoto(old);
+    return null;
+  }
+  const next = await putPhoto(ui.photo);
+  if(next === null) return old || null;            // write failed: keep the photo we already had
+  if(old) await delPhoto(old);
+  return next;
+}
+// pull inline photos out of a loaded/restored state into their own records
+async function splitOutPhotos(st){
+  for(const coll of PHOTO_COLLS){
+    for(const rec of (st[coll] || [])){
+      if(rec.photo){
+        rec.photoId = await putPhoto(rec.photo);
+      }
+      delete rec.photo;
+    }
+  }
+  return st;
+}
+// inline them again for a backup, so a backup stays one complete, portable file
+async function inlinePhotos(st){
+  const out = JSON.parse(JSON.stringify(st));
+  for(const coll of PHOTO_COLLS){
+    for(const rec of (out[coll] || [])){
+      const d = rec.photoId ? await getPhoto(rec.photoId) : null;
+      delete rec.photoId;
+      if(d) rec.photo = d;
+    }
+  }
+  return out;
+}
+// Records can leave the cellar without going through a delete button — drinking the last
+// bottle removes a wine (Undo has to be able to bring it back, so its photo can't be dropped
+// then), a restore replaces everything, a tab can close mid-write. Rather than trust every
+// path to tidy up, sweep unreferenced photos at startup.
+async function cleanupOrphanPhotos(){
+  try{
+    const used = new Set();
+    PHOTO_COLLS.forEach(c => (state[c]||[]).forEach(r => { if(r.photoId) used.add(r.photoId); }));
+    for(const k of await idbKeys()){
+      const key = String(k);
+      if(!key.startsWith('photo:')) continue;
+      const id = key.slice(6);
+      if(!used.has(id)){ photoCache.delete(id); await idbDel(key); }
+    }
+  }catch(e){}
+}
+async function clearPhotos(){
+  photoCache.clear();
+  try{
+    const keys = await idbKeys();
+    for(const k of keys) if(String(k).startsWith('photo:')) await idbDel(k);
+  }catch(e){}
+}
 function save(){ idbSet('state', state).catch(()=>{ try{localStorage.setItem(LS_KEY, JSON.stringify(state));}catch(e){} }); }
 
 function migrate(){
   let dirty = false;
   if(!Array.isArray(state.consumed)){ state.consumed = []; dirty = true; }
+  if(!Array.isArray(state.farms)){ state.farms = []; dirty = true; }
+  if(!state.farmStars5){                                   // farm scores /100 -> 5 stars
+    state.farms.forEach(f=>{ if(+f.rating > 5) f.rating = Math.min(5, Math.max(0.5, Math.round(+f.rating/10)/2)); });
+    state.farmStars5 = true; dirty = true;
+  }
   if(!state.rating100){
     state.tastings.forEach(t=>{ if(+t.rating>0 && +t.rating<=5) t.rating = +t.rating*20; });
     state.rating100 = true; dirty = true;
@@ -379,19 +521,34 @@ function migrate(){
   if(dirty) save();
 }
 
+let stateLoaded = false;
 async function boot(){
   try{
     const s = await idbGet('state');
-    if(s && Array.isArray(s.wines)) state = s;
+    if(s && Array.isArray(s.wines)){ state = s; stateLoaded = true; }
     else{
       const old = localStorage.getItem(LS_KEY);          // migrate v1 data
       if(old){ state = JSON.parse(old); save(); }
+      stateLoaded = true;                                // nothing stored yet: a fresh install
     }
   }catch(e){
-    try{ const old = localStorage.getItem(LS_KEY); if(old) state = JSON.parse(old); }catch(_){}
+    try{ const old = localStorage.getItem(LS_KEY); if(old){ state = JSON.parse(old); stateLoaded = true; } }catch(_){}
   }
   migrate();
+  await migratePhotos();
   render();
+  hydratePhotos();
+  // only ever sweep when we know what the cellar actually contains — a failed read
+  // must not be mistaken for "nothing references these photos"
+  if(stateLoaded) cleanupOrphanPhotos();
+}
+// one-time: photos used to live inline in the state blob, making every save rewrite them all
+async function migratePhotos(){
+  if(state.photoStore) return;
+  const hasInline = PHOTO_COLLS.some(c => (state[c]||[]).some(r => r.photo));
+  if(hasInline) await splitOutPhotos(state);
+  state.photoStore = true;
+  save();
 }
 
 const uid = ()=> Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -477,15 +634,17 @@ function render(){
   const act = document.activeElement;
   const keepFocus = (act && (act.id==='cellar-search' || act.id==='tastings-search'))
     ? { id: act.id, pos: act.selectionStart } : null;
+  const oldRow = document.getElementById('cellar-filters');
+  const keepScroll = oldRow ? oldRow.scrollLeft : null;
   document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===ui.tab));
   const a = alertWines(), n = a.past.length+a.soon.length;
   const badge = document.getElementById('alertBadge');
   badge.style.display = n? 'block':'none'; badge.textContent = n;
-  document.getElementById('fab').style.display = (ui.tab==='cellar'||ui.tab==='tastings')?'flex':'none';
+  document.getElementById('fab').style.display = (ui.tab==='stats')?'none':'flex';
   const m = document.getElementById('main');
   if(ui.tab==='cellar')   m.innerHTML = viewCellar();
   if(ui.tab==='tastings') m.innerHTML = viewTastings();
-  if(ui.tab==='alerts')   m.innerHTML = viewAlerts();
+  if(ui.tab==='farms')    m.innerHTML = viewFarms();
   if(ui.tab==='stats')    m.innerHTML = viewStats();
   if(keepFocus){
     const el = document.getElementById(keepFocus.id);
@@ -495,52 +654,90 @@ function render(){
       try{ el.setSelectionRange(p, p); }catch(e){}
     }
   }
+  restoreFilterScroll(keepScroll);
+  hydratePhotos();
   requestAnimationFrame(fsUpdate);
 }
-function fabAction(){ ui.tab==='tastings' ? openTastingForm() : openWineForm(); }
+// photos load only for the cards actually rendered, and are cached after the first read
+async function hydratePhotos(){
+  const imgs = document.querySelectorAll('img[data-photo]:not([src])');
+  for(const img of imgs){
+    const d = await getPhoto(img.dataset.photo);
+    if(d) img.src = d;
+  }
+}
+function restoreFilterScroll(prev){
+  const row = document.getElementById('cellar-filters');
+  if(!row) return;
+  if(prev != null) row.scrollLeft = prev;          // the row is rebuilt each render, so put it back
+  const chip = row.querySelector('.filter.active');
+  const view = row.clientWidth;
+  if(!chip || !view) return;
+  const left = chip.offsetLeft, right = left + chip.offsetWidth;
+  if(left < row.scrollLeft) row.scrollLeft = Math.max(0, left - 12);
+  else if(right > row.scrollLeft + view) row.scrollLeft = right - view + 12;
+}
+function fabAction(){
+  if(ui.tab==='tastings') openTastingForm();
+  else if(ui.tab==='farms') openFarmForm();
+  else openWineForm();
+}
 
 /* ================= cellar view ================= */
 const TYPES=['Red','White','Rosé','Sparkling','Dessert','Fortified'];
+const SORT_LABELS = {
+  recent:  ['Newest',        'Oldest'],
+  window:  ['Drink-by',      'Drink-by (last)'],
+  score:   ['Score (high)',  'Score (low)'],
+  price:   ['Value (low)',   'Value (high)'],
+  vintage: ['Vintage (old)', 'Vintage (new)'],
+  name:    ['A–Z',           'Z–A']
+};
+const sortLabel = (k, rev) => (SORT_LABELS[k] || SORT_LABELS.recent)[rev ? 1 : 0];
 function viewCellar(){
   const q = ui.search.toLowerCase();
   const windowEnd = w => parseInt(w.drinkTo)||parseInt(w.drinkFrom)||9999;
+  // every comparator falls back to the name, so bottles that tie (a whole CSV
+  // import shares one timestamp) still have a definite order — and can be reversed
+  const byName = (a,b)=>(a.name||'').localeCompare(b.name||'');
   const sorts = {
-    recent:(a,b)=>(b.created||0)-(a.created||0),
-    window:(a,b)=>windowEnd(a)-windowEnd(b),
-    score:(a,b)=>(+b.score||0)-(+a.score||0),
-    price:(a,b)=>((+b.price||0)-(+a.price||0)) || (a.name||'').localeCompare(b.name||''),
-    vintage:(a,b)=>(parseInt(a.vintage)||9999)-(parseInt(b.vintage)||9999),
-    name:(a,b)=>(a.name||'').localeCompare(b.name||''),
+    recent:(a,b)=>((b.created||0)-(a.created||0)) || byName(a,b),
+    window:(a,b)=>(windowEnd(a)-windowEnd(b)) || byName(a,b),
+    score:(a,b)=>((+b.score||0)-(+a.score||0)) || byName(a,b),
+    vintage:(a,b)=>((parseInt(a.vintage)||9999)-(parseInt(b.vintage)||9999)) || byName(a,b),
+    name:byName,
     price:(a,b)=>{
       const pa = +a.price||0, pb = +b.price||0;
-      if(pa && pb) return (pa-pb) || (a.name||'').localeCompare(b.name||'');
+      if(pa && pb) return (pa-pb) || byName(a,b);
       if(pa) return 1;                                 // unpriced bottles first
       if(pb) return -1;
-      return (a.name||'').localeCompare(b.name||'');
+      return byName(a,b);
     }
   };
-  let list = state.wines.slice().sort(sorts[ui.sort]||sorts.recent);
-  if(ui.filter!=='All') list = list.filter(w=>w.type===ui.filter);
+  const cmp = sorts[ui.sort] || sorts.recent;
+  const dir = ui.sortRev ? -1 : 1;
+  let list = state.wines.slice().sort((a,b)=> dir * cmp(a,b));
+  const att = alertWines(), attN = att.past.length + att.soon.length;
+  if(ui.filter==='Attention'){
+    const ids = new Set([...att.past, ...att.soon].map(w=>w.id));
+    list = list.filter(w=>ids.has(w.id)).sort(sorts.window);
+  }
+  else if(ui.filter!=='All') list = list.filter(w=>w.type===ui.filter);
   if(q) list = list.filter(w=>[w.name,w.producer,w.region,w.country,w.varietal,w.vintage].join(' ').toLowerCase().includes(q));
   const bottles = state.wines.reduce((s,w)=>s+(+w.qty||0),0);
   let html = `
     <div class="search-row">
       <input id="cellar-search" placeholder="Search the cellar…" value="${esc(ui.search)}" oninput="ui.search=this.value;debouncedRender()">
-      <select class="sort-select" onchange="ui.sort=this.value;render()">
-        <option value="recent" ${ui.sort==='recent'?'selected':''}>Newest</option>
-        <option value="window" ${ui.sort==='window'?'selected':''}>Drink-by</option>
-        <option value="score" ${ui.sort==='score'?'selected':''}>Score</option>
-        <option value="price" ${ui.sort==='price'?'selected':''}>Value</option>
-        <option value="vintage" ${ui.sort==='vintage'?'selected':''}>Vintage</option>
-        <option value="name" ${ui.sort==='name'?'selected':''}>A–Z</option>
-        <option value="price" ${ui.sort==='price'?'selected':''}>Value</option>
-      </select>
+      <button class="sort-btn" id="sort-btn" onclick="openSortSheet()"><span class="g">⇅</span>${sortLabel(ui.sort, ui.sortRev)}</button>
     </div>
-    <div class="filters">${['All',...TYPES].map(t=>
-      `<button class="filter ${ui.filter===t?'active':''}" onclick="ui.filter='${t}';render()">${t}</button>`).join('')}
+    <div class="filters" id="cellar-filters">
+      <button class="filter ${ui.filter==='All'?'active':''}" onclick="ui.filter='All';render()">All</button>
+      ${attN?`<button class="filter att ${ui.filter==='Attention'?'active':''}" onclick="ui.filter='Attention';render()">Needs attention · ${attN}</button>`:''}
+      ${TYPES.map(t=>`<button class="filter ${ui.filter===t?'active':''}" onclick="ui.filter='${t}';render()">${t}</button>`).join('')}
     </div>
     <div class="section-head"><span class="eyebrow">In the cellar</span><span class="count">${bottles} bottle${bottles===1?'':'s'}</span></div>`;
   if(!state.wines.length) return html + emptyState('◈','Your cellar is empty.<br>Add your first bottle to start the book.','Add a bottle','openWineForm()');
+  if(!list.length && ui.filter==='Attention') return html + emptyState('⌛','Nothing needs attention.<br>Every bottle is resting comfortably.');
   if(!list.length) return html + emptyState('◈','No wines match this search.');
   return html + list.map(cardHTML).join('');
 }
@@ -559,7 +756,7 @@ function cardHTML(w){
   return `
   <div class="card">
     <div class="card-body">
-      ${w.photo?`<img class="thumb" src="${w.photo}" onclick="lightbox('${w.id}','wines')" alt="Label">`:''}
+      ${w.photoId?`<img class="thumb" data-photo="${w.photoId}" onclick="lightbox('${w.id}','wines')" alt="Label">`:''}
       <div>
         <div class="wine-name">${esc(w.name)}</div>
         <div class="wine-sub"><span class="type-dot t-${w.type}"></span>${esc(w.producer||'')}${w.producer&&w.vintage?' · ':''}${esc(w.vintage||'')}</div>
@@ -669,7 +866,7 @@ function viewTastings(){
   return html + list.map(t=>`
     <div class="card tasting-card">
       <div class="card-body">
-        ${t.photo?`<img class="thumb" src="${t.photo}" onclick="lightbox('${t.id}','tastings')" alt="Label">`:''}
+        ${t.photoId?`<img class="thumb" data-photo="${t.photoId}" onclick="lightbox('${t.id}','tastings')" alt="Label">`:''}
         <div>
           <div class="wine-name" style="font-size:18px">${esc(t.name)}${t.vintage?' <span style="color:var(--muted);font-weight:500">'+esc(t.vintage)+'</span>':''}</div>
           ${(t.producer||t.varietal||t.region)?`<div class="wine-sub">${t.type?`<span class="type-dot t-${t.type}"></span>`:''}${[t.producer,t.varietal,t.region,t.country].filter(Boolean).map(esc).join(' · ')}</div>`:''}
@@ -691,34 +888,204 @@ function fmtDate(d){
   const dt = new Date(d+'T00:00');
   return dt.toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'});
 }
-function deleteTasting(id){
+async function deleteTasting(id){
   if(!confirm('Delete this tasting note?')) return;
+  const gone = state.tastings.find(t=>t.id===id);
+  if(gone && gone.photoId) await delPhoto(gone.photoId);
   state.tastings = state.tastings.filter(t=>t.id!==id); save(); render();
 }
-function lightbox(id, coll){
+async function lightbox(id, coll){
   const rec = state[coll].find(x=>x.id===id);
-  if(!rec?.photo) return;
+  if(!rec?.photoId) return;
+  const data = await getPhoto(rec.photoId);
+  if(!data) return;
   const root = document.getElementById('lightbox-root');
-  root.innerHTML = `<div class="lightbox" onclick="this.remove();maybeDisarm()"><img src="${rec.photo}" alt="Label photo"></div>`;
+  root.innerHTML = `<div class="lightbox" onclick="this.remove();maybeDisarm()"><img src="${data}" alt="Label photo"></div>`;
   armBack();
 }
 
-/* ================= alerts view ================= */
-function viewAlerts(){
-  const a = alertWines();
-  let html = `<div class="section-head"><span class="eyebrow">Drinking windows</span><span class="count">${YEAR}</span></div>`;
-  if(!a.past.length && !a.soon.length)
-    return html + emptyState('⌛','Nothing needs attention.<br>Every bottle is resting comfortably.');
-  if(a.soon.length) html += group('Drink soon — window closes within a year', a.soon);
-  if(a.past.length) html += group('Past window — open these first', a.past);
-  return html;
-  function group(title,items){
-    return `<div class="alert-group">
-      <div class="alert-band"><span class="eyebrow">${title}</span><span class="rule"></span></div>
-      ${items.map(cardHTML).join('')}</div>`;
-  }
+function openSortSheet(){
+  sheetHTML(`<h2>Sort the cellar</h2>
+    <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px">Tap the selected sort again to reverse it.</p>
+    ${Object.keys(SORT_LABELS).map(k=>{
+      const on = ui.sort === k;
+      return `<button class="settings-btn sort-row ${on?'on':''}" onclick="pickSort('${k}')">
+        <span>${sortLabel(k, on && ui.sortRev)}</span>
+        ${on?`<span class="sort-dir">${ui.sortRev?'↑':'↓'}</span>`:''}
+      </button>`;
+    }).join('')}`);
+}
+function pickSort(k){
+  if(ui.sort === k) ui.sortRev = !ui.sortRev;      // same one again -> flip the order
+  else { ui.sort = k; ui.sortRev = false; }
+  closeSheet(); render();
 }
 
+/* ================= wine farms ================= */
+const farmById = id => id ? state.farms.find(f=>f.id===id) : null;
+const starFill = (r, n) => Math.max(0, Math.min(1, (+r||0) - (n-1)));   // 0, .5 or 1
+const starsHTML = r => `<span class="stars-row">`+[1,2,3,4,5].map(n=>
+  `<span class="star-wrap"><span class="star-base">★</span>`+
+  `<span class="star-fill" style="width:${(starFill(r,n)*1.08).toFixed(2)}em"><span class="star-inner">★</span></span></span>`
+).join('')+`</span>`;
+function viewFarms(){
+  const list = state.farms.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'') || (b.created||0)-(a.created||0));
+  let html = `<div class="section-head"><span class="eyebrow">Farms visited</span><span class="count">${list.length}</span></div>`;
+  if(!list.length) return html + emptyState('⌂','No farms recorded yet.<br>Check in when you next visit one.','Add a farm','openFarmForm()');
+  return html + list.map(farmCardHTML).join('');
+}
+function farmCardHTML(f){
+  const sub = [f.region, f.country].filter(Boolean).map(esc).join(' · ');
+  return `
+  <div class="card">
+    <div class="card-body">
+      ${f.photoId?`<img class="thumb" data-photo="${f.photoId}" onclick="lightbox('${f.id}','farms')" alt="Farm photo">`:''}
+      <div>
+        <div class="wine-name">${esc(f.name)}</div>
+        ${sub?`<div class="wine-sub">${sub}</div>`:''}
+        ${f.date?`<div class="tasting-date">Visited ${fmtDate(f.date)}</div>`:''}
+      </div>
+      ${+f.rating>0?`<div class="stars">${starsHTML(f.rating)}</div>`:''}
+    </div>
+    ${f.notes?`<div class="tasting-notes">${esc(f.notes)}</div>`:''}
+    <div class="card-actions">
+      <button class="chip-btn wine" onclick="openFarmMaps('${f.id}')">Open in Maps</button>
+      <button class="chip-btn" onclick="shareFarm('${f.id}')">Share</button>
+      <button class="chip-btn" onclick="openFarmForm('${f.id}')">Edit</button>
+    </div>
+  </div>`;
+}
+function farmMapsUrl(f){
+  const q = (f.lat!=null) ? f.lat+','+f.lng
+                          : [f.name, f.region, f.country].filter(Boolean).join(' ');
+  return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q);
+}
+function openFarmMaps(id){
+  const f = farmById(id); if(!f) return;
+  window.open(farmMapsUrl(f), '_blank', 'noopener');
+}
+function buildFarmMessage(f){
+  const lines = [f.name];
+  const where = [f.region, f.country].filter(Boolean).join(', ');
+  if(where) lines.push(where);
+  const bits = [];
+  if(+f.rating > 0) bits.push('Rated '+(+f.rating)+'/5');
+  if(f.date) bits.push('visited '+fmtDate(f.date));
+  if(bits.length) lines.push(bits.join(' \u00B7 '));
+  if(f.notes) lines.push('', f.notes);
+  lines.push('', farmMapsUrl(f));
+  return lines.join('\n');
+}
+async function shareFarm(id){
+  const f = farmById(id); if(!f) return;
+  const text = buildFarmMessage(f);
+  if(navigator.share){
+    // the link lives inside the text so WhatsApp can't drop it
+    try{ await navigator.share({ title: f.name, text }); }
+    catch(e){ /* sheet dismissed — nothing to do */ }
+    return;
+  }
+  window.open('https://wa.me/?text='+encodeURIComponent(text), '_blank', 'noopener');
+}
+function geoBoxHTML(){
+  if(!ui.geo) return `
+    <div class="f-row"><label>Location</label>
+      <button class="photo-box" onclick="checkIn()">\uD83D\uDCCD &nbsp;Check in here</button>
+      <div class="status-line" id="geo-status"></div>
+    </div>`;
+  return `
+    <div class="f-row"><label>Location</label>
+      <div class="photo-preview">
+        <div class="col">
+          <div style="font-size:13px;font-weight:600">\uD83D\uDCCD ${ui.geo.lat.toFixed(5)}, ${ui.geo.lng.toFixed(5)}</div>
+          <div style="height:8px"></div>
+          <button class="mini-btn" onclick="checkIn()">Update</button>
+          <button class="mini-btn quiet" style="margin-left:6px" onclick="ui.geo=null;refreshGeoBox()">Remove</button>
+        </div>
+      </div>
+      <div class="status-line" id="geo-status"></div>
+    </div>`;
+}
+function refreshGeoBox(){
+  const el = document.getElementById('geo-holder');
+  if(el) el.innerHTML = geoBoxHTML();
+}
+function setGeoStatus(msg, err){
+  const el = document.getElementById('geo-status');
+  if(el){ el.textContent = msg; el.classList.toggle('err', !!err); }
+}
+function checkIn(){
+  if(!navigator.geolocation){ setGeoStatus('This device has no location support.', true); return; }
+  setGeoStatus('Getting your location…');
+  navigator.geolocation.getCurrentPosition(
+    p => {
+      ui.geo = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) };
+      refreshGeoBox();
+      setGeoStatus('Checked in \u2014 accurate to about '+Math.round(p.coords.accuracy)+' m.');
+    },
+    e => setGeoStatus('Could not get your location ('+((e&&e.message)||'permission denied')+'). Allow location access and try again.', true),
+    { enableHighAccuracy:true, timeout:15000, maximumAge:60000 }
+  );
+}
+async function openFarmForm(id){
+  const f = id? farmById(id) : null;
+  ui.photoMode = 'farm';
+  await loadFormPhoto(f, true);
+  ui.geo = (f && f.lat!=null) ? { lat:f.lat, lng:f.lng } : null;
+  ui.farmStars = f ? (+f.rating||0) : 0;
+  const v = k => esc(f?.[k]??'');
+  const today = new Date().toISOString().slice(0,10);
+  sheetHTML(`
+    <h2>${f?'Edit farm':'Add a wine farm'}</h2>
+    <div id="photo-holder">${photoBoxHTML()}</div>
+    <div id="geo-holder">${geoBoxHTML()}</div>
+    <div class="f-row"><label>Farm name</label><input id="fm-name" value="${v('name')}" placeholder="e.g. Kanonkop Wine Estate"></div>
+    <div class="f-split">
+      <div class="f-row"><label>Region</label><input id="fm-region" value="${v('region')}" placeholder="Stellenbosch"></div>
+      <div class="f-row"><label>Country</label><input id="fm-country" value="${v('country')}" placeholder="South Africa"></div>
+    </div>
+    <div class="f-row"><label>Date visited</label><input id="fm-date" type="date" value="${f?(f.date||''):today}"></div>
+    <div class="f-row"><label>Rating</label>
+      <div id="farm-stars-holder">${farmStarPickHTML()}</div>
+    </div>
+    <div class="f-row"><label>Review</label><textarea id="fm-notes" placeholder="The tasting room, the people, what you tasted, whether you'd go back…">${v('notes')}</textarea></div>
+    <button class="primary-btn" onclick="saveFarm('${id||''}')">${f?'Save changes':'Add farm'}</button>
+    ${f?`<button class="danger-link" onclick="deleteFarm('${id}')">Remove this farm</button>`:''}
+  `);
+}
+function farmStarPickHTML(){
+  return `<div class="star-pick" id="farm-stars">`+[1,2,3,4,5].map(n=>
+    `<span class="star-wrap"><span class="star-base">★</span>`+
+    `<span class="star-fill" style="width:${(starFill(ui.farmStars,n)*1.08).toFixed(2)}em"><span class="star-inner">★</span></span>`+
+    `<button type="button" class="half hl" onclick="pickFarmStar(${n-0.5})" aria-label="${n-0.5} stars"></button>`+
+    `<button type="button" class="half hr" onclick="pickFarmStar(${n})" aria-label="${n} stars"></button></span>`
+  ).join('')+
+  `${ui.farmStars? '<button type="button" class="mini-btn quiet star-clear" onclick="pickFarmStar(0)">Clear</button>':''}</div>`;
+}
+function pickFarmStar(v){
+  ui.farmStars = (ui.farmStars === v) ? 0 : v;             // tap the same spot to clear
+  const holder = document.getElementById('farm-stars-holder');
+  if(holder) holder.innerHTML = farmStarPickHTML();
+}
+async function saveFarm(id){
+  const g = i => document.getElementById(i).value.trim();
+  const name = g('fm-name');
+  if(!name){ alert('Give the farm a name.'); return; }
+  const rating = ui.farmStars || 0;
+  const data = { name, region:g('fm-region'), country:g('fm-country'), date:g('fm-date'),
+    rating, notes:g('fm-notes'), photoId: await commitFormPhoto(),
+    lat: ui.geo? ui.geo.lat : null, lng: ui.geo? ui.geo.lng : null };
+  if(id){ Object.assign(farmById(id), data); }
+  else { state.farms.push({ id:uid(), created:Date.now(), ...data }); ui.tab = 'farms'; }
+  save(); closeSheet(); render();
+}
+async function deleteFarm(id){
+  if(!confirm('Remove this farm and its review?')) return;
+  const gone = farmById(id);
+  if(gone && gone.photoId) await delPhoto(gone.photoId);
+  state.farms = state.farms.filter(f=>f.id!==id);
+  save(); closeSheet(); render();
+}
 /* ================= stats view ================= */
 function viewStats(){
   const wines = state.wines, tastings = state.tastings;
@@ -759,6 +1126,7 @@ function viewStats(){
       ${best?`<div class="plain-row"><span>Best tasting</span><span>${esc(best.name)} · ${best.rating} pts</span></div>`:''}
       <div class="plain-row"><span>Journal entries</span><span>${tastings.length}</span></div>
       <div class="plain-row"><span>Tasted in ${YEAR}</span><span>${yr}</span></div>
+      ${state.farms.length?`<div class="plain-row"><span>Farms visited</span><span>${state.farms.length}</span></div>`:''}
     </div>`;
 }
 
@@ -826,7 +1194,7 @@ function deleteConsumed(id){
   save(); render(); openConsumptionLog();
 }
 
-/* ================= photos & label scanning ================= */
+/* ================= photos ================= */
 function compressImage(file, maxDim=1100, q=.72){
   return new Promise(res=>{
     const img = new Image();
@@ -842,176 +1210,45 @@ function compressImage(file, maxDim=1100, q=.72){
   });
 }
 function photoBoxHTML(){
+  const farmMode = ui.photoMode === 'farm';
+  const lbl = farmMode ? 'Photo' : 'Label photo';
   if(!ui.photo) return `
-    <div class="f-row"><label>Label photo</label>
+    <div class="f-row"><label>${lbl}</label>
       <div class="f-split">
         <button class="photo-box" onclick="document.getElementById('photo-camera').click()">📷 &nbsp;Take photo</button>
         <button class="photo-box" onclick="document.getElementById('photo-gallery').click()">🖼 &nbsp;From gallery</button>
       </div>
       <input type="file" id="photo-camera" accept="image/*" capture="environment" style="display:none" onchange="photoPicked(this)">
       <input type="file" id="photo-gallery" accept="image/*" style="display:none" onchange="photoPicked(this)">
-      <div class="scan-status" id="scan-status"></div>
     </div>`;
   return `
-    <div class="f-row"><label>Label photo</label>
+    <div class="f-row"><label>${lbl}</label>
       <div class="photo-preview">
-        <img src="${ui.photo}" alt="Label">
+        <img src="${ui.photo}" alt="${lbl}">
         <div class="col">
-          <button class="mini-btn" onclick="runOCR()">Read label</button>
-          <div style="height:8px"></div>
-          <button class="mini-btn quiet" onclick="ui.photo=null;ui.photoOCR=null;refreshPhotoBox()">Remove photo</button>
+          <button class="mini-btn quiet" onclick="removePhoto()">Remove photo</button>
         </div>
       </div>
-      <div class="scan-status" id="scan-status"></div>
-      <div id="ocr-chips"></div>
     </div>`;
 }
 async function photoPicked(input){
   const f = input.files[0]; if(!f) return;
-  ui.photo = await compressImage(f);                 // 1100px copy for storage
-  ui.photoOCR = await compressImage(f, 1800, .9);    // sharper copy for reading
+  ui.photo = await compressImage(f);
+  ui.photoDirty = true;
   refreshPhotoBox();
 }
+function removePhoto(){ ui.photo = null; ui.photoDirty = true; refreshPhotoBox(); }
 function refreshPhotoBox(){
   const holder = document.getElementById('photo-holder');
   if(holder) holder.innerHTML = photoBoxHTML();
 }
-function setScanStatus(msg, err){
-  const el = document.getElementById('scan-status');
-  if(el){ el.textContent = msg; el.classList.toggle('err', !!err); }
-}
-/* ---- on-device OCR (Tesseract.js) ---- */
-function loadTesseract(){
-  if(window.Tesseract) return Promise.resolve();
-  return new Promise((res,rej)=>{
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.4/dist/tesseract.min.js';
-    s.onload = res; s.onerror = () => rej(new Error('download failed'));
-    document.head.appendChild(s);
-  });
-}
-const OCR_JUNK = /(\b\d{2,4}\s?m?l\b)|(\b\d{2}\s?cl\b)|alc(ohol)?\b|% ?vol|\bvol\.?$|product of|produce of|wine of|estate bottled|contains sul|sulphit|sulfit/i;
-function showLineChips(texts){
-  const box = document.getElementById('ocr-chips');
-  if(!box || !texts.length) return;
-  const chips = texts.slice(0,7).map(t =>
-    `<button class="mini-btn quiet" style="margin:0 6px 6px 0" onclick="useOcrLine(this)">${esc(t)}</button>`).join('');
-  box.innerHTML = `<div style="margin-top:8px;font-size:11px;color:var(--muted);font-weight:600">Lines read from the label — tap one to use as the name:</div><div style="margin-top:6px">${chips}</div>`;
-}
-function fillVintageFrom(text){
-  const vint = (text.match(/\b(19[5-9]\d|20[0-4]\d)\b/)||[])[0];
-  if(vint){
-    const vEl = document.getElementById('f-vintage') || document.getElementById('t-vintage');
-    if(vEl && !vEl.value) vEl.value = vint;
-  }
-  return vint;
-}
-function finishLabelRead(cands, fullText, doneMsg){
-  const vint = fillVintageFrom(fullText);
-  const named = cands.filter(l => !OCR_JUNK.test(l.text));
-  if(!named.length){
-    setScanStatus('No readable text found — stylised labels are hard for OCR. Try a straighter, closer, well-lit shot.', true);
-    return;
-  }
-  named.sort((a,b)=> b.h - a.h);
-  const nameEl = document.getElementById('f-name') || document.getElementById('t-name');
-  if(nameEl && !nameEl.value) nameEl.value = named[0].text;
-  showLineChips(named.map(l=>l.text));
-  setScanStatus(doneMsg + (vint ? ' Name and vintage filled in — tap a line to correct.' : ' Tap a line below to correct the name.'));
-}
-function preprocessForOCR(src){
-  return new Promise(res=>{
-    const img = new Image();
-    img.onload = ()=>{
-      const scale = Math.min(2, 1800/Math.max(img.width,img.height));
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
-      const ctx = c.getContext('2d');
-      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, 0, 0, c.width, c.height);
-      const im = ctx.getImageData(0, 0, c.width, c.height), d = im.data;
-      const hist = new Uint32Array(256);
-      for(let i=0;i<d.length;i+=4){
-        const g = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2])|0;
-        d[i] = g; hist[g]++;
-      }
-      const cut = (d.length/4)*0.01;                 // clip 1% outliers, stretch the rest
-      let lo=0, hi=255, acc=0;
-      for(let v=0;v<256;v++){ acc+=hist[v]; if(acc>cut){ lo=v; break; } }
-      acc=0;
-      for(let v=255;v>=0;v--){ acc+=hist[v]; if(acc>cut){ hi=v; break; } }
-      const range = Math.max(1, hi-lo);
-      for(let i=0;i<d.length;i+=4){
-        let g = (d[i]-lo)*255/range; g = g<0?0:g>255?255:g;
-        d[i]=d[i+1]=d[i+2]=g;
-      }
-      ctx.putImageData(im, 0, 0);
-      res(c.toDataURL('image/png'));
-    };
-    img.src = src;
-  });
-}
-let ocrWorkerP = null;
-function getOcrWorker(){
-  if(!ocrWorkerP){
-    ocrWorkerP = (async () => {
-      const w = await Tesseract.createWorker();      // v4 API: options object, not a language
-      await w.loadLanguage('eng');
-      await w.initialize('eng');
-      return w;
-    })();
-    ocrWorkerP.catch(() => { ocrWorkerP = null; });  // a failed download must not poison retries
-  }
-  return ocrWorkerP;
-}
-async function runOCR(){
-  const src = ui.photoOCR || ui.photo;
-  if(!src) return;
-  setScanStatus('Loading text reader — first use downloads a few MB…');
-  try{ await loadTesseract(); }
-  catch(e){ setScanStatus('Could not load the OCR library. Check your connection and try again.', true); return; }
-  try{
-    setScanStatus('Preparing the photo…');
-    const prepped = await preprocessForOCR(src);
-    setScanStatus('Loading the language model — first use downloads a few MB…');
-    const worker = await getOcrWorker();
-    const cands = [], seen = new Set();
-    let fullText = '', passErr = null;
-    for(const psm of ['3','11']){                    // auto layout, then sparse-text sweep
-      setScanStatus('Reading the label — pass '+(psm==='3'?'1':'2')+' of 2…');
-      try{
-        await worker.setParameters({ tessedit_pageseg_mode: psm });
-        const { data } = await worker.recognize(prepped);
-        fullText += '\n' + (data.text || '');
-        for(const l of (data.lines || [])){
-          const text = String(l.text||'').replace(/\s+/g,' ').trim();
-          if(!text || (l.confidence ?? 0) <= 40 || !/[A-Za-z]{3}/.test(text)) continue;
-          const key = text.toLowerCase();
-          if(seen.has(key)) continue;
-          seen.add(key);
-          cands.push({ text, h: l.bbox ? (l.bbox.y1 - l.bbox.y0) : 0 });
-        }
-      }catch(pe){ passErr = pe; }                    // one bad pass shouldn't sink the other
-    }
-    if(!cands.length && passErr) throw passErr;
-    finishLabelRead(cands, fullText, 'Done.');
-  }catch(e){
-    const msg = (e && e.message) ? e.message : (typeof e === 'string' && e ? e : 'engine error');
-    setScanStatus('OCR failed ('+msg+'). Check your signal and tap Read label to retry, or fill in by hand.', true);
-  }
-}
-function useOcrLine(btn){
-  const el = document.getElementById('f-name') || document.getElementById('t-name');
-  if(el) el.value = btn.textContent;
-}
-
 /* ================= wine form ================= */
 const FORMATS = ['750ml','375ml Half','500ml','1.5L Magnum','3L Double magnum'];
-function openWineForm(id, pre){
+async function openWineForm(id, pre){
   const w = id? state.wines.find(x=>x.id===id) : null;
   const p = w || pre || {};
-  ui.photo = w?.photo || null;
-  ui.photoOCR = null;
+  ui.photoMode = 'label';
+  await loadFormPhoto(w || pre, !!w);
   const v = k => esc(p[k]??'');
   sheetHTML(`
     <h2>${w?'Edit bottle':'Add to the cellar'}</h2>
@@ -1050,7 +1287,7 @@ function openWineForm(id, pre){
     ${w?`<button class="danger-link" onclick="deleteWine('${id}')">Remove from cellar</button>`:''}
   `);
 }
-function saveWine(id){
+async function saveWine(id){
   const g = i => document.getElementById(i).value.trim();
   const name = g('f-name');
   if(!name){ alert('Give the wine a name.'); return; }
@@ -1063,7 +1300,7 @@ function saveWine(id){
     qty:Math.max(0,parseInt(g('f-qty'))||0), price:parseFloat(g('f-price'))||'',
     score, drinkFrom:g('f-from'), drinkTo:g('f-to'), notes:g('f-notes'),
     format:document.getElementById('f-format').value, purchaseDate:g('f-bought'),
-    photo: ui.photo || null
+    photoId: await commitFormPhoto()
   };
   if(id){ Object.assign(state.wines.find(x=>x.id===id), data); }
   else {
@@ -1072,8 +1309,10 @@ function saveWine(id){
   }
   save(); closeSheet(); render();
 }
-function deleteWine(id){
+async function deleteWine(id){
   if(!confirm('Remove this wine from the cellar? Tasting notes are kept.')) return;
+  const gone = state.wines.find(w=>w.id===id);
+  if(gone && gone.photoId) await delPhoto(gone.photoId);
   state.wines = state.wines.filter(w=>w.id!==id);
   save(); closeSheet(); render();
 }
@@ -1192,12 +1431,12 @@ function aromaBodyHTML(){
 }
 
 /* ================= tasting form ================= */
-function openTastingForm(id, prefillWine, openedInfo){
+async function openTastingForm(id, prefillWine, openedInfo){
   const t = id? state.tastings.find(x=>x.id===id) : null;
   const p = t || prefillWine || {};
   const v = k => esc(p[k]??'');
-  ui.photo = t?.photo || (prefillWine?.photo || null);
-  ui.photoOCR = null;
+  ui.photoMode = 'label';
+  await loadFormPhoto(t || prefillWine, !!t);
   ui.sat = { ...(t?.sat || {}) };
   ui.aromas = [ ...(t?.aromas || []) ];
   const today = new Date().toISOString().slice(0,10);
@@ -1238,7 +1477,7 @@ function openTastingForm(id, prefillWine, openedInfo){
     <button class="primary-btn" onclick="saveTasting('${id||''}')">${t?'Save changes':'Add to journal'}</button>
   `);
 }
-function saveTasting(id){
+async function saveTasting(id){
   const g = i => document.getElementById(i).value.trim();
   const name = g('t-name');
   if(!name){ alert('Which wine did you taste?'); return; }
@@ -1247,7 +1486,7 @@ function saveTasting(id){
   const data = { name, producer:g('t-producer'), vintage:normVintage(g('t-vintage')),
     type:document.getElementById('t-type').value, varietal:g('t-varietal'),
     country:g('t-country'), region:g('t-region'),
-    date:g('t-date'), rating, notes:g('t-notes'), photo: ui.photo||null,
+    date:g('t-date'), rating, notes:g('t-notes'), photoId: await commitFormPhoto(),
     sat: Object.keys(ui.sat||{}).length ? { ...ui.sat } : null,
     aromas: (ui.aromas||[]).length ? [ ...ui.aromas ] : null };
   if(id){ Object.assign(state.tastings.find(x=>x.id===id), data); }
@@ -1280,8 +1519,8 @@ function openSettings(){
     <button class="danger-link" onclick="wipeData()">Erase all data</button>
   `);
 }
-function exportData(){
-  const blob = new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+async function exportData(){
+  const blob = new Blob([JSON.stringify(await inlinePhotos(state),null,2)],{type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'cellarbook-backup-'+new Date().toISOString().slice(0,10)+'.json';
@@ -1292,7 +1531,7 @@ async function shareBackup(){
   // Android only allows sharing whitelisted file types — .json is not one of
   // them, so the backup travels as plain text (.txt). Restore reads it fine.
   const name = 'cellarbook-backup-'+new Date().toISOString().slice(0,10)+'.txt';
-  const file = new File([JSON.stringify(state,null,2)], name, {type:'text/plain'});
+  const file = new File([JSON.stringify(await inlinePhotos(state),null,2)], name, {type:'text/plain'});
   if(navigator.canShare && navigator.canShare({files:[file]})){
     try{
       await navigator.share({ files:[file], title:'Cellar Book backup' });
@@ -1520,7 +1759,7 @@ function buildImportPlan(rows){
       score: scn > 0 ? Math.min(100, scn) : '',
       drinkFrom:get(r,'drinkFrom').replace(/[^\d]/g,'').slice(0,4),
       drinkTo:get(r,'drinkTo').replace(/[^\d]/g,'').slice(0,4),
-      purchaseDate: dateNorm(get(r,'purchaseDate')), notes:get(r,'notes'), photo:null
+      purchaseDate: dateNorm(get(r,'purchaseDate')), notes:get(r,'notes'), photoId:null
     };
     const ex = state.wines.find(x => sameWine(x, w));
     if(ex) updates.push({ id: ex.id, w }); else adds.push(w);
@@ -1704,30 +1943,50 @@ async function exportTastingsPDF(){
 function importData(input){
   const file = input.files[0]; if(!file) return;
   const r = new FileReader();
-  r.onload = () => {
+  r.onload = async () => {
     try{
       const data = JSON.parse(r.result);
-      if(!Array.isArray(data.wines) || !Array.isArray(data.tastings)) throw 0;
-      state = data; migrate(); save(); closeSheet(); render();
-    }catch(e){ alert('That file is not a valid Cellar Book backup.'); }
+      if(!data || typeof data !== 'object') throw new Error('not a backup file');
+      if(!Array.isArray(data.wines) || !Array.isArray(data.tastings)) throw new Error('no cellar in this file');
+      for(const coll of ['wines','tastings','farms','consumed']){
+        if(data[coll] !== undefined && !Array.isArray(data[coll])) throw new Error('the '+coll+' section is damaged');
+      }
+      const named = [...data.wines, ...data.tastings, ...(data.farms||[])];
+      if(named.some(x => !x || typeof x !== 'object' || typeof x.name !== 'string')) throw new Error('some records are damaged');
+      // write the incoming photos first; only drop the old ones once the swap has worked
+      const oldIds = PHOTO_COLLS.flatMap(c => (state[c]||[]).map(x=>x.photoId).filter(Boolean));
+      await splitOutPhotos(data);
+      data.photoStore = true;
+      state = data; migrate(); save(); closeSheet(); render(); hydratePhotos();
+      for(const id of oldIds) await delPhoto(id);
+    }catch(e){
+      alert('That file could not be restored'+((e&&e.message)?' — '+e.message+'.':'.')+' Your current cellar is untouched.');
+    }
   };
   r.readAsText(file);
 }
-function wipeData(){
+async function wipeData(){
   if(!confirm('Erase every bottle and tasting note? This cannot be undone.')) return;
-  state = { wines:[], tastings:[] }; save(); closeSheet(); render();
+  await clearPhotos();
+  state = { wines:[], tastings:[], farms:[], consumed:[], rating100:true, farmStars5:true, photoStore:true };
+  save(); closeSheet(); render();
 }
 
 /* ================= sheet plumbing ================= */
+// forms open asynchronously (they read their photo first), so a deferred 'open'
+// could land after something else closed the sheet. The token makes a stale one a no-op.
+let sheetSeq = 0;
 function sheetHTML(inner){
   const s = document.getElementById('sheet');
   s.innerHTML = '<div class="sheet-handle"></div>'+inner;
   s.scrollTop = 0;
   document.getElementById('backdrop').classList.add('open');
-  requestAnimationFrame(()=>s.classList.add('open'));
+  const mine = ++sheetSeq;
+  requestAnimationFrame(()=>{ if(mine === sheetSeq) s.classList.add('open'); });
   armBack();
 }
 function closeSheet(){
+  sheetSeq++;                                      // cancel any open still in flight
   document.getElementById('sheet').classList.remove('open');
   document.getElementById('backdrop').classList.remove('open');
   maybeDisarm();
