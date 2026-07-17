@@ -360,7 +360,7 @@ details.tier[open] summary:after{content:'−'}
 /* ================= storage (IndexedDB, migrates from old localStorage) ================= */
 const LS_KEY='cellarbook-v1';
 let state = { wines:[], tastings:[] };
-let ui = { tab:'cellar', search:'', filter:'All', tSearch:'', tFilterWine:null, photo:null, photoId:null, photoDirty:false, photoMode:'label', geo:null, farmStars:0, sort:'recent', sortRev:false };
+let ui = { tab:'cellar', search:'', filter:'All', tSearch:'', tFilterWine:null, photo:null, photoId:null, photoDirty:false, photoMode:'label', geo:null, farmStars:0, geoManualOpen:false, sort:'recent', sortRev:false, farmSort:'date', farmSortRev:false };
 
 function idbOpen(){
   return new Promise((res,rej)=>{
@@ -928,11 +928,43 @@ const starsHTML = r => `<span class="stars-row">`+[1,2,3,4,5].map(n=>
   `<span class="star-wrap"><span class="star-base">★</span>`+
   `<span class="star-fill" style="width:${(starFill(r,n)*1.08).toFixed(2)}em"><span class="star-inner">★</span></span></span>`
 ).join('')+`</span>`;
+const FARM_SORT_LABELS = {
+  date:   ['Newest visit', 'Oldest visit'],
+  rating: ['Rating (high)', 'Rating (low)']
+};
+const farmSortLabel = () => (FARM_SORT_LABELS[ui.farmSort] || FARM_SORT_LABELS.date)[ui.farmSortRev ? 1 : 0];
 function viewFarms(){
-  const list = state.farms.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'') || (b.created||0)-(a.created||0));
-  let html = `<div class="section-head"><span class="eyebrow">Farms visited</span><span class="count">${list.length}</span></div>`;
+  const byFName = (a,b)=>(a.name||'').localeCompare(b.name||'');
+  const cmps = {
+    date:  (a,b)=>((b.date||'').localeCompare(a.date||'')) || ((b.created||0)-(a.created||0)) || byFName(a,b),
+    rating:(a,b)=>((+b.rating||0)-(+a.rating||0)) || byFName(a,b)
+  };
+  const cmp = cmps[ui.farmSort] || cmps.date;
+  const dir = ui.farmSortRev ? -1 : 1;
+  const list = state.farms.slice().sort((a,b)=> dir * cmp(a,b));
+  let html = `<div class="section-head"><span class="eyebrow">Farms visited</span>
+    <span style="display:flex;align-items:center;gap:8px">
+      ${list.length>1?`<button class="sort-btn" id="farm-sort-btn" onclick="openFarmSortSheet()"><span class="g">⇅</span>${farmSortLabel()}</button>`:''}
+      <span class="count">${list.length}</span>
+    </span></div>`;
   if(!list.length) return html + emptyState('⌂','No farms recorded yet.<br>Check in when you next visit one.','Add a farm','openFarmForm()');
   return html + list.map(farmCardHTML).join('');
+}
+function openFarmSortSheet(){
+  sheetHTML(`<h2>Sort the farms</h2>
+    <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px">Tap the selected sort again to reverse it.</p>
+    ${Object.keys(FARM_SORT_LABELS).map(k=>{
+      const on = ui.farmSort === k;
+      return `<button class="settings-btn sort-row ${on?'on':''}" onclick="pickFarmSort('${k}')">
+        <span>${(FARM_SORT_LABELS[k])[on && ui.farmSortRev ? 1 : 0]}</span>
+        ${on?`<span class="sort-dir">${ui.farmSortRev?'↑':'↓'}</span>`:''}
+      </button>`;
+    }).join('')}`);
+}
+function pickFarmSort(k){
+  if(ui.farmSort === k) ui.farmSortRev = !ui.farmSortRev;
+  else { ui.farmSort = k; ui.farmSortRev = false; }
+  closeSheet(); render();
 }
 function farmCardHTML(f){
   const sub = [f.region, f.country].filter(Boolean).map(esc).join(' · ');
@@ -987,10 +1019,20 @@ async function shareFarm(id){
   }
   window.open('https://wa.me/?text='+encodeURIComponent(text), '_blank', 'noopener');
 }
+function geoManualHTML(){
+  const cur = ui.geo ? ui.geo.lat+', '+ui.geo.lng : '';
+  return `
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input id="geo-manual" value="${cur}" placeholder="-33.9321, 18.8602" style="flex:1" inputmode="text" autocomplete="off">
+      <button class="mini-btn" onclick="setManualGeo()">Set</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:5px">In Google Maps, press and hold the spot — the numbers appear at the top. Copy and paste them here.</div>`;
+}
 function geoBoxHTML(){
   if(!ui.geo) return `
     <div class="f-row"><label>Location</label>
       <button class="photo-box" onclick="checkIn()">\uD83D\uDCCD &nbsp;Check in here</button>
+      ${ui.geoManualOpen ? geoManualHTML() : `<button class="mini-btn quiet" style="margin-top:8px" onclick="ui.geoManualOpen=true;refreshGeoBox()">Or type / paste coordinates</button>`}
       <div class="status-line" id="geo-status"></div>
     </div>`;
   return `
@@ -1000,11 +1042,32 @@ function geoBoxHTML(){
           <div style="font-size:13px;font-weight:600">\uD83D\uDCCD ${ui.geo.lat.toFixed(5)}, ${ui.geo.lng.toFixed(5)}</div>
           <div style="height:8px"></div>
           <button class="mini-btn" onclick="checkIn()">Update</button>
-          <button class="mini-btn quiet" style="margin-left:6px" onclick="ui.geo=null;refreshGeoBox()">Remove</button>
+          <button class="mini-btn quiet" style="margin-left:6px" onclick="ui.geoManualOpen=true;refreshGeoBox()">Edit</button>
+          <button class="mini-btn quiet" style="margin-left:6px" onclick="ui.geo=null;ui.geoManualOpen=false;refreshGeoBox()">Remove</button>
         </div>
       </div>
+      ${ui.geoManualOpen ? geoManualHTML() : ''}
       <div class="status-line" id="geo-status"></div>
     </div>`;
+}
+function parseLatLng(t){
+  const m = String(t||'').trim().match(/^(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if(!m) return null;
+  const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+  if(!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat: +lat.toFixed(6), lng: +lng.toFixed(6) };
+}
+function setManualGeo(){
+  const el = document.getElementById('geo-manual');
+  const parsed = parseLatLng(el && el.value);
+  if(!parsed){
+    setGeoStatus('Couldn\u2019t read that \u2014 paste the two numbers like: -33.9321, 18.8602', true);
+    return;                                          // keep what was typed so it can be corrected
+  }
+  ui.geo = parsed;
+  ui.geoManualOpen = false;
+  refreshGeoBox();
+  setGeoStatus('Location set.');
 }
 function refreshGeoBox(){
   const el = document.getElementById('geo-holder');
@@ -1030,6 +1093,7 @@ function checkIn(){
 async function openFarmForm(id){
   const f = id? farmById(id) : null;
   ui.photoMode = 'farm';
+  ui.geoManualOpen = false;
   await loadFormPhoto(f, true);
   ui.geo = (f && f.lat!=null) ? { lat:f.lat, lng:f.lng } : null;
   ui.farmStars = f ? (+f.rating||0) : 0;

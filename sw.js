@@ -1,4 +1,4 @@
-const CACHE = 'cellarbook-v40';
+const CACHE = 'cellarbook-v41';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
