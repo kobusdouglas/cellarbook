@@ -1384,11 +1384,11 @@ async function deleteWine(id){
 /* ================= structured tasting (WSET-style dimensions) ================= */
 const SAT_COLOURS = {
   White:['lemon-green','lemon','gold','amber','brown'],
-  Sparkling:['lemon-green','lemon','gold','amber'],
+  Sparkling:['lemon-green','lemon','gold','amber','pink','salmon','orange','purple','ruby','garnet'],
   'Rosé':['pink','salmon','orange'],
   Red:['purple','ruby','garnet','tawny','brown'],
   Dessert:['lemon','gold','amber','brown'],
-  Fortified:['gold','amber','tawny','brown']
+  Fortified:['lemon','gold','amber','purple','ruby','garnet','tawny','brown']
 };
 const SAT_SCALE5 = ['light','M-','M','M+','pronounced'];
 function satRow(key, label, opts){
@@ -1401,8 +1401,7 @@ function satPick(key, val, btn){
   ui.sat[key] = val;
   btn.parentElement.querySelectorAll('.sat-pill').forEach(b=>b.classList.toggle('on', b===btn));
 }
-function satBodyHTML(){
-  const type = document.getElementById('t-type') ? document.getElementById('t-type').value : 'Red';
+function satBodyHTML(type){
   return `
     <div class="sat-h">Appearance</div>
     ${satRow('appIntensity','Intensity',['pale','medium','deep'])}
@@ -1429,7 +1428,7 @@ function refreshSat(){
   if(ui.sat.colour && !colours.includes(ui.sat.colour)) delete ui.sat.colour;
   if(type !== 'Sparkling') delete ui.sat.mousse;
   const el = document.getElementById('sat-body');
-  if(el) el.innerHTML = satBodyHTML();
+  if(el) el.innerHTML = satBodyHTML(type);
 }
 function satSummary(t){
   const s = t.sat; if(!s) return '';
@@ -1455,7 +1454,7 @@ const AROMAS = [
     ['Citrus fruit', 'grapefruit, lemon, lime (juice or zest), orange peel, lemon peel'],
     ['Stone fruit', 'peach, apricot, nectarine'],
     ['Tropical fruit', 'banana, lychee, mango, melon, passion fruit, pineapple'],
-    ['Red fruit', 'redcurrant, cranberry, raspberry, strawberry, red cherry, red plum'],
+    ['Red fruit', 'redcurrant, cranberry, raspberry, strawberry, red cherry, red plum, pomegranate'],
     ['Black fruit', 'blackcurrant, blackberry, bramble, blueberry, black cherry, black plum'],
     ['Dried/cooked fruit', 'fig, prune, raisin, sultana, kirsch, jamminess, baked/stewed fruits, preserved fruits'],
     ['Herbaceous', 'green bell pepper (capsicum), grass, tomato leaf, asparagus, blackcurrant leaf'],
@@ -1532,7 +1531,7 @@ async function openTastingForm(id, prefillWine, openedInfo){
     <div class="f-row"><label>Notes</label><textarea id="t-notes" placeholder="Nose, palate, finish, who you shared it with…">${esc(t?.notes||'')}</textarea></div>
     <details class="sat" ${t && t.sat && Object.keys(t.sat).length ? 'open' : ''}>
       <summary>Structured tasting</summary>
-      <div class="sat-body" id="sat-body">${satBodyHTML()}</div>
+      <div class="sat-body" id="sat-body">${satBodyHTML(p.type || 'Red')}</div>
     </details>
     <details class="sat" ${t && t.aromas && t.aromas.length ? 'open' : ''}>
       <summary>Aromas &amp; flavours</summary>
